@@ -1,3 +1,219 @@
-import type { FastifyInstance } from "fastify"; import { db } from "./db.js"; import { createPantry,itemParams,householdParams,updatePantry } from "./contracts.js"; import { requireHousehold } from "./authorize.js"; import { errors } from "./errors.js"; import { normalizeName } from "./security.js";
-const shape={id:true,name:true,quantity:true,unit:true,category:true,expirationDate:true,version:true} as const;
-export async function pantryRoutes(app:FastifyInstance){app.get("/api/v1/households/:householdId/pantry",async req=>{const {householdId}=householdParams.parse(req.params);await requireHousehold(req,householdId);return db.pantryItem.findMany({where:{householdId,archivedAt:null},select:shape,orderBy:{name:"asc"}})}); app.post("/api/v1/households/:householdId/pantry",async(req,reply)=>{const {householdId}=householdParams.parse(req.params);await requireHousehold(req,householdId,true);const input=createPantry.parse(req.body);const item=await db.$transaction(async tx=>{const row=await tx.pantryItem.create({data:{householdId,...input,expirationDate:input.expirationDate?new Date(input.expirationDate):null,normalizedName:normalizeName(input.name),createdByUserId:req.authUser!.id,updatedByUserId:req.authUser!.id},select:shape});await tx.auditEvent.create({data:{actorUserId:req.authUser!.id,householdId,action:"pantry.item.created",resourceType:"PantryItem",resourceId:row.id,result:"success",correlationId:req.correlationId,metadata:{version:row.version}}});await tx.outboxMessage.create({data:{topic:"pantry-events",messageType:"pantry.item.created",aggregateType:"PantryItem",aggregateId:row.id,correlationId:req.correlationId,payload:{householdId,itemId:row.id}}});return row});reply.code(201);return item}); app.patch("/api/v1/households/:householdId/pantry/:itemId",async req=>{const {householdId,itemId}=itemParams.parse(req.params);await requireHousehold(req,householdId,true);const input=updatePantry.parse(req.body);const {version,...changes}=input;return db.$transaction(async tx=>{const result=await tx.pantryItem.updateMany({where:{id:itemId,householdId,version,archivedAt:null},data:{...changes,...(changes.name?{normalizedName:normalizeName(changes.name)}:{}),expirationDate:changes.expirationDate?new Date(changes.expirationDate):changes.expirationDate,version:{increment:1},updatedByUserId:req.authUser!.id}});if(result.count!==1)throw errors.conflict();const row=await tx.pantryItem.findUniqueOrThrow({where:{id:itemId},select:shape});await tx.auditEvent.create({data:{actorUserId:req.authUser!.id,householdId,action:"pantry.item.updated",resourceType:"PantryItem",resourceId:itemId,result:"success",correlationId:req.correlationId,metadata:{version:row.version}}});await tx.outboxMessage.create({data:{topic:"pantry-events",messageType:"pantry.item.updated",aggregateType:"PantryItem",aggregateId:itemId,correlationId:req.correlationId,payload:{householdId,itemId}}});return row})}); app.delete("/api/v1/households/:householdId/pantry/:itemId",async(req,reply)=>{const {householdId,itemId}=itemParams.parse(req.params);await requireHousehold(req,householdId,true);const version=Number((req.query as any).version);if(!Number.isInteger(version))throw errors.conflict();await db.$transaction(async tx=>{const result=await tx.pantryItem.updateMany({where:{id:itemId,householdId,version,archivedAt:null},data:{archivedAt:new Date(),version:{increment:1},updatedByUserId:req.authUser!.id}});if(result.count!==1)throw errors.conflict();await tx.auditEvent.create({data:{actorUserId:req.authUser!.id,householdId,action:"pantry.item.deleted",resourceType:"PantryItem",resourceId:itemId,result:"success",correlationId:req.correlationId,metadata:{version}}});await tx.outboxMessage.create({data:{topic:"pantry-events",messageType:"pantry.item.deleted",aggregateType:"PantryItem",aggregateId:itemId,correlationId:req.correlationId,payload:{householdId,itemId}}})});reply.code(204).send()})}
+import type { FastifyInstance } from "fastify";
+import type { Prisma } from "@prisma/client";
+import { db } from "./db.js";
+import {
+  createPantry,
+  householdParams,
+  itemParams,
+  updatePantry
+} from "./contracts.js";
+import { requireHousehold } from "./authorize.js";
+import { errors } from "./errors.js";
+import { normalizeName } from "./security.js";
+
+const pantrySelect = {
+  id: true,
+  name: true,
+  quantity: true,
+  unit: true,
+  category: true,
+  expirationDate: true,
+  version: true
+} satisfies Prisma.PantryItemSelect;
+
+export async function pantryRoutes(app: FastifyInstance): Promise<void> {
+  app.get(
+    "/api/v1/households/:householdId/pantry",
+    async request => {
+      const { householdId } = householdParams.parse(request.params);
+      await requireHousehold(request, householdId);
+
+      return db.pantryItem.findMany({
+        where: { householdId, archivedAt: null },
+        select: pantrySelect,
+        orderBy: { name: "asc" }
+      });
+    }
+  );
+
+  app.post(
+    "/api/v1/households/:householdId/pantry",
+    async (request, reply) => {
+      const { householdId } = householdParams.parse(request.params);
+      await requireHousehold(request, householdId, true);
+      const input = createPantry.parse(request.body);
+
+      const createData: Prisma.PantryItemUncheckedCreateInput = {
+        householdId,
+        name: input.name,
+        normalizedName: normalizeName(input.name),
+        quantity: input.quantity,
+        unit: input.unit,
+        category: input.category ?? null,
+        expirationDate: input.expirationDate
+          ? new Date(input.expirationDate)
+          : null,
+        createdByUserId: request.authUser!.id,
+        updatedByUserId: request.authUser!.id
+      };
+
+      const item = await db.$transaction(async transaction => {
+        const row = await transaction.pantryItem.create({
+          data: createData,
+          select: pantrySelect
+        });
+
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: request.authUser!.id,
+            householdId,
+            action: "pantry.item.created",
+            resourceType: "PantryItem",
+            resourceId: row.id,
+            result: "success",
+            correlationId: request.correlationId,
+            metadata: { version: row.version }
+          }
+        });
+
+        await transaction.outboxMessage.create({
+          data: {
+            topic: "pantry-events",
+            messageType: "pantry.item.created",
+            aggregateType: "PantryItem",
+            aggregateId: row.id,
+            correlationId: request.correlationId,
+            payload: { householdId, itemId: row.id }
+          }
+        });
+
+        return row;
+      });
+
+      return reply.code(201).send(item);
+    }
+  );
+
+  app.patch(
+    "/api/v1/households/:householdId/pantry/:itemId",
+    async request => {
+      const { householdId, itemId } = itemParams.parse(request.params);
+      await requireHousehold(request, householdId, true);
+      const input = updatePantry.parse(request.body);
+
+      const updateData: Prisma.PantryItemUncheckedUpdateManyInput = {
+        version: { increment: 1 },
+        updatedByUserId: request.authUser!.id
+      };
+
+      if (input.name !== undefined) {
+        updateData.name = input.name;
+        updateData.normalizedName = normalizeName(input.name);
+      }
+      if (input.quantity !== undefined) updateData.quantity = input.quantity;
+      if (input.unit !== undefined) updateData.unit = input.unit;
+      if (input.category !== undefined) updateData.category = input.category;
+      if (input.expirationDate !== undefined) {
+        updateData.expirationDate = input.expirationDate === null
+          ? null
+          : new Date(input.expirationDate);
+      }
+
+      return db.$transaction(async transaction => {
+        const result = await transaction.pantryItem.updateMany({
+          where: {
+            id: itemId,
+            householdId,
+            version: input.version,
+            archivedAt: null
+          },
+          data: updateData
+        });
+
+        if (result.count !== 1) throw errors.conflict();
+
+        const row = await transaction.pantryItem.findUniqueOrThrow({
+          where: { id: itemId },
+          select: pantrySelect
+        });
+
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: request.authUser!.id,
+            householdId,
+            action: "pantry.item.updated",
+            resourceType: "PantryItem",
+            resourceId: itemId,
+            result: "success",
+            correlationId: request.correlationId,
+            metadata: { version: row.version }
+          }
+        });
+
+        await transaction.outboxMessage.create({
+          data: {
+            topic: "pantry-events",
+            messageType: "pantry.item.updated",
+            aggregateType: "PantryItem",
+            aggregateId: itemId,
+            correlationId: request.correlationId,
+            payload: { householdId, itemId }
+          }
+        });
+
+        return row;
+      });
+    }
+  );
+
+  app.delete(
+    "/api/v1/households/:householdId/pantry/:itemId",
+    async (request, reply) => {
+      const { householdId, itemId } = itemParams.parse(request.params);
+      await requireHousehold(request, householdId, true);
+
+      const query = request.query as { version?: string };
+      const version = Number(query.version);
+      if (!Number.isInteger(version) || version < 1) throw errors.conflict();
+
+      await db.$transaction(async transaction => {
+        const result = await transaction.pantryItem.updateMany({
+          where: { id: itemId, householdId, version, archivedAt: null },
+          data: {
+            archivedAt: new Date(),
+            version: { increment: 1 },
+            updatedByUserId: request.authUser!.id
+          }
+        });
+
+        if (result.count !== 1) throw errors.conflict();
+
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: request.authUser!.id,
+            householdId,
+            action: "pantry.item.deleted",
+            resourceType: "PantryItem",
+            resourceId: itemId,
+            result: "success",
+            correlationId: request.correlationId,
+            metadata: { version }
+          }
+        });
+
+        await transaction.outboxMessage.create({
+          data: {
+            topic: "pantry-events",
+            messageType: "pantry.item.deleted",
+            aggregateType: "PantryItem",
+            aggregateId: itemId,
+            correlationId: request.correlationId,
+            payload: { householdId, itemId }
+          }
+        });
+      });
+
+      return reply.code(204).send();
+    }
+  );
+}
