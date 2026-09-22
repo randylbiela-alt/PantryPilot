@@ -1,0 +1,1 @@
+import { buildApp } from "./app.js"; import { db } from "./db.js"; const app=await buildApp(); const shutdown=async()=>{await app.close();await db.$disconnect();process.exit(0)};process.on("SIGTERM",shutdown);process.on("SIGINT",shutdown);await app.listen({host:app.config.HOST,port:app.config.PORT});

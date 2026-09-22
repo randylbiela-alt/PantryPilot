@@ -1,0 +1,1 @@
+import type { User, HouseholdRole } from "@prisma/client"; declare module "fastify" { interface FastifyRequest { authUser?: User; correlationId:string; householdRole?: HouseholdRole } }

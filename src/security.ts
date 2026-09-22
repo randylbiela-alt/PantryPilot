@@ -1,0 +1,1 @@
+import { createHash, randomBytes } from "node:crypto"; export const randomToken=()=>randomBytes(32).toString("base64url"); export const hashToken=(token:string,pepper:string)=>createHash("sha256").update(token+pepper).digest("hex"); export const normalizeName=(s:string)=>s.trim().toLocaleLowerCase("en-US").replace(/\s+/g," ");
