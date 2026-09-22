@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "cross-env RUN_INTEGRATION=true vitest run tests/integration",
+    "test:integration": "cross-env RUN_INTEGRATION=true vitest run --config vitest.integration.config.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
