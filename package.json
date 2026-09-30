@@ -18,7 +18,8 @@
     "validate": "npm run lint && npm run test && npm run build && npm run openapi",
     "postinstall": "prisma generate",
     "generate": "prisma generate",
-    "build:full": "prisma generate && tsc -p tsconfig.build.json"
+    "build:full": "prisma generate && tsc -p tsconfig.build.json",
+    "sessions:cleanup": "tsx src/cleanup-sessions.ts"
   },
   "dependencies": {
     "@azure/msal-node": "^3.7.3",
