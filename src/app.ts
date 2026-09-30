@@ -14,6 +14,7 @@ import { AppError } from "./errors.js";
 import { pantryRoutes } from "./pantry.js";
 import { groceryRoutes } from "./grocery.js";
 import { onboardingRoutes } from "./onboarding.js";
+import { sessionRoutes } from "./session-routes.js";
 import { hashToken } from "./security.js";
 
 declare module "fastify" {
@@ -109,6 +110,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   app.get("/health", async () => ({ status: "ok" }));
 
   await app.register(auth);
+  await sessionRoutes(app);
 
   app.get("/api/v1/auth/session", async request => ({
     user: request.authUser
@@ -119,33 +121,6 @@ export async function buildApp(overrides?: Partial<Config>) {
         }
       : null
   }));
-
-  app.post("/api/v1/auth/sign-out", async (request, reply) => {
-    const token =
-      request.cookies["__Host-pantrypilot-session"] ??
-      request.cookies["pantrypilot-session"];
-
-    if (token) {
-      await db.userSession.updateMany({
-        where: {
-          tokenHash: hashToken(token, config.SESSION_PEPPER)
-        },
-        data: {
-          revokedAt: new Date()
-        }
-      });
-    }
-
-    reply
-      .clearCookie(
-        config.NODE_ENV === "production"
-          ? "__Host-pantrypilot-session"
-          : "pantrypilot-session",
-        { path: "/" }
-      )
-      .code(204)
-      .send();
-  });
 
   app.get("/api/v1/bootstrap", async request => {
     const userId = request.authUser!.id;
