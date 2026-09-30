@@ -1,4 +1,4 @@
-generator client {
+﻿generator client {
   provider = "prisma-client-js"
 }
 
@@ -49,12 +49,6 @@ enum MealPlanStatus {
   READY
   FAILED
   ARCHIVED
-}
-
-enum MealType {
-  BREAKFAST
-  LUNCH
-  DINNER
 }
 
 model User {
@@ -211,12 +205,15 @@ model PlannedMeal {
   budgetFriendly     Boolean  @default(true)
   servings           Int
   version            Int      @default(1)
-  mealPlan           MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  mealPlan           MealPlan @relation(
+    fields: [mealPlanId],
+    references: [id],
+    onDelete: Cascade
+  )
 
   @@unique([mealPlanId, mealDate, mealType])
   @@index([mealPlanId, mealDate])
 }
-
 model AuditEvent {
   id            String   @id @default(uuid()) @db.Uuid
   occurredAt    DateTime @default(now()) @db.Timestamptz(6)
@@ -245,3 +242,5 @@ model OutboxMessage {
 
   @@index([publishedAt, createdAt])
 }
+
+
