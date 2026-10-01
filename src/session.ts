@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+﻿import { randomBytes } from "node:crypto";
 import type { FastifyReply } from "fastify";
 import type { Config } from "./config.js";
 import { hashToken } from "./security.js";
@@ -26,11 +26,7 @@ export function sessionCookieOptions(
     path: "/",
     httpOnly: true,
 
-    /*
-     * Cross-site cookie support for:
-     * Vercel frontend
-     * Railway backend
-     */
+    // Cross-site cookies for Vercel -> Railway
     sameSite: production
       ? ("none" as const)
       : ("lax" as const),
