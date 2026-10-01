@@ -21,12 +21,7 @@ export function sessionCookieOptions(
 ) {
   const production =
     config.NODE_ENV === "production";
-  console.log(
-    "COOKIE ENV",
-  {
-  nodeEnv: config.NODE_ENV
-  }
-  );
+
   return {
     path: "/",
     httpOnly: true,
