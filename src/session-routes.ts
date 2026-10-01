@@ -5,7 +5,7 @@ import { errors } from "./errors.js";
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/v1/auth/dev-session", async (request, reply) => {
-    if (app.config.NODE_ENV === "production" || !app.config.ALLOW_DEV_AUTH) {
+    if (!app.config.ALLOW_DEV_AUTH) {
       throw errors.notFound();
     }
     console.log("DEV SESSION START");
@@ -68,6 +68,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 }
+
 
 
 
