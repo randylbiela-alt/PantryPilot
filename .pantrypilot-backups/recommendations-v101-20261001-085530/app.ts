@@ -18,7 +18,6 @@ import { sessionRoutes } from "./session-routes.js";
 import { mealPlanningRoutes } from "./meal-planning.js";
 import { recipeRoutes } from "./recipes.js";
 import { groceryGenerationRoutes } from "./grocery-generation.js";
-import { intelligenceRoutes } from "./intelligence.js";
 
 declare module "fastify" { interface FastifyInstance { config: Config; } }
 
@@ -61,7 +60,6 @@ export async function buildApp(overrides?: Partial<Config>) {
   await mealPlanningRoutes(app);
   await recipeRoutes(app);
   await groceryGenerationRoutes(app);
-  await intelligenceRoutes(app);
   app.setErrorHandler((error, request, reply) => {
     const status = error instanceof AppError ? error.status : error instanceof ZodError ? 400 : typeof (error as { statusCode?: number }).statusCode === "number" ? (error as { statusCode: number }).statusCode : 500;
     const code = error instanceof AppError ? error.code : error instanceof ZodError ? "VALIDATION_FAILED" : status < 500 ? "REQUEST_FAILED" : "INTERNAL_ERROR";
