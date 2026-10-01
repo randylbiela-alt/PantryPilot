@@ -3,3 +3,7 @@ dist/
 .env
 coverage/
 openapi.json
+
+.pantrypilot-backups/
+.pantrypilot-ocr31-last-backup.txt
+.pantrypilot-ocr311-last-backup.txt
