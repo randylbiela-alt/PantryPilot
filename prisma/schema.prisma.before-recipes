@@ -58,17 +58,17 @@ enum MealType {
 }
 
 model User {
-  id           String            @id @default(uuid()) @db.Uuid
+  id           String             @id @default(uuid()) @db.Uuid
   displayName  String?
   primaryEmail String?
-  status       UserStatus        @default(ACTIVE)
+  status       UserStatus         @default(ACTIVE)
   identities   ExternalIdentity[]
   sessions     UserSession[]
   profile      UserProfile?
   memberships  HouseholdMember[]
-  createdAt    DateTime          @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime          @updatedAt @db.Timestamptz(6)
-  lastLoginAt  DateTime?         @db.Timestamptz(6)
+  createdAt    DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @db.Timestamptz(6)
+  lastLoginAt  DateTime?          @db.Timestamptz(6)
 }
 
 model ExternalIdentity {
@@ -125,7 +125,6 @@ model Household {
   pantryItems     PantryItem[]
   groceryLists    GroceryList[]
   mealPlans       MealPlan[]
-  recipes         Recipe[]
   createdAt       DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime          @updatedAt @db.Timestamptz(6)
 }
@@ -216,38 +215,6 @@ model PlannedMeal {
 
   @@unique([mealPlanId, mealDate, mealType])
   @@index([mealPlanId, mealDate])
-}
-
-model Recipe {
-  id          String             @id @default(uuid()) @db.Uuid
-  householdId String             @db.Uuid
-  name        String
-  description String?
-  servings    Int                @default(4)
-  prepMinutes Int                @default(0)
-  cookMinutes Int                @default(0)
-  favorite    Boolean            @default(false)
-  tags        String[]           @default([])
-  version     Int                @default(1)
-  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime           @updatedAt @db.Timestamptz(6)
-  household   Household          @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  ingredients RecipeIngredient[]
-
-  @@index([householdId, name])
-  @@index([householdId, favorite])
-}
-
-model RecipeIngredient {
-  id        String  @id @default(uuid()) @db.Uuid
-  recipeId  String  @db.Uuid
-  name      String
-  quantity  Decimal @db.Decimal(12, 3)
-  unit      String
-  sortOrder Int     @default(0)
-  recipe    Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
-
-  @@index([recipeId, sortOrder])
 }
 
 model AuditEvent {
