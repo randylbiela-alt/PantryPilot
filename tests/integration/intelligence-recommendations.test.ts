@@ -50,8 +50,12 @@ describe("recipe recommendations", () => {
       ]
     );
 
-    expect(recommendations[0].score).toBe(0);
-    expect(recommendations[0].missingIngredients[0]).toEqual({
+    expect(recommendations).toHaveLength(1);
+
+const recommendation = recommendations[0]!;
+
+expect(recommendation.score).toBe(0);
+    expect(recommendation.missingIngredients[0]).toEqual({
       name: "Tortillas",
       requiredQuantity: 8,
       availableQuantity: 4,
