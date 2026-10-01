@@ -1,11 +1,12 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "./db.js";
 import { requireHousehold } from "./authorize.js";
 import { errors } from "./errors.js";
 
 const uuid = z.string().uuid();
-const ingredient = z.object({
+const ingredientInput = z.object({
   name: z.string().trim().min(1).max(120),
   quantity: z.number().positive().max(100000),
   unit: z.string().trim().min(1).max(40)
@@ -18,7 +19,7 @@ const recipeInput = z.object({
   cookMinutes: z.number().int().min(0).max(1440),
   favorite: z.boolean(),
   tags: z.array(z.string().trim().min(1).max(40)).max(20),
-  ingredients: z.array(ingredient).min(1).max(100)
+  ingredients: z.array(ingredientInput).min(1).max(100)
 }).strict();
 const updateInput = recipeInput.extend({ version: z.number().int().min(1) }).strict();
 const householdParams = z.object({ householdId: uuid }).strict();
@@ -27,9 +28,23 @@ const listQuery = z.object({ search: z.string().trim().max(100).optional() }).st
 const deleteQuery = z.object({ version: z.coerce.number().int().min(1) }).strict();
 const include = { ingredients: { orderBy: { sortOrder: "asc" as const } } };
 
-async function auditAndPublish(tx: Parameters<Parameters<typeof db.$transaction>[0]>[0], request: any, householdId: string, recipeId: string, action: string) {
-  await tx.auditEvent.create({ data: { actorUserId: request.authUser!.id, householdId, action, resourceType: "Recipe", resourceId: recipeId, result: "success", correlationId: request.correlationId } });
-  await tx.outboxMessage.create({ data: { topic: "recipe-events", messageType: action, aggregateType: "Recipe", aggregateId: recipeId, correlationId: request.correlationId, payload: { householdId, recipeId } } });
+async function auditAndPublish(
+  tx: Prisma.TransactionClient,
+  request: FastifyRequest,
+  householdId: string,
+  recipeId: string,
+  action: string
+) {
+  await tx.auditEvent.create({ data: {
+    actorUserId: request.authUser!.id, householdId, action,
+    resourceType: "Recipe", resourceId: recipeId, result: "success",
+    correlationId: request.correlationId, metadata: { versioned: true }
+  }});
+  await tx.outboxMessage.create({ data: {
+    topic: "recipe-events", messageType: action, aggregateType: "Recipe",
+    aggregateId: recipeId, correlationId: request.correlationId,
+    payload: { householdId, recipeId }
+  }});
 }
 
 export async function recipeRoutes(app: FastifyInstance): Promise<void> {
@@ -38,7 +53,10 @@ export async function recipeRoutes(app: FastifyInstance): Promise<void> {
     const { search } = listQuery.parse(request.query);
     await requireHousehold(request, householdId);
     return db.recipe.findMany({
-      where: { householdId, ...(search ? { OR: [{ name: { contains: search, mode: "insensitive" } }, { tags: { has: search } }] } : {}) },
+      where: { householdId, ...(search ? { OR: [
+        { name: { contains: search, mode: "insensitive" as const } },
+        { tags: { has: search } }
+      ] } : {}) },
       include,
       orderBy: [{ favorite: "desc" }, { name: "asc" }]
     });
@@ -59,11 +77,11 @@ export async function recipeRoutes(app: FastifyInstance): Promise<void> {
     const row = await db.$transaction(async tx => {
       const created = await tx.recipe.create({ data: {
         householdId, name: input.name, description: input.description ?? null,
-        servings: input.servings, prepMinutes: input.prepMinutes, cookMinutes: input.cookMinutes,
-        favorite: input.favorite, tags: input.tags,
-        ingredients: { create: input.ingredients.map((x, i) => ({ ...x, sortOrder: i })) }
+        servings: input.servings, prepMinutes: input.prepMinutes,
+        cookMinutes: input.cookMinutes, favorite: input.favorite, tags: input.tags,
+        ingredients: { create: input.ingredients.map((value, index) => ({ ...value, sortOrder: index })) }
       }, include });
-      await auditAndPublish(tx as any, request, householdId, created.id, "recipe.created");
+      await auditAndPublish(tx, request, householdId, created.id, "recipe.created");
       return created;
     });
     return reply.code(201).send(row);
@@ -74,15 +92,21 @@ export async function recipeRoutes(app: FastifyInstance): Promise<void> {
     const input = updateInput.parse(request.body);
     await requireHousehold(request, householdId, true);
     return db.$transaction(async tx => {
-      const changed = await tx.recipe.updateMany({ where: { id: recipeId, householdId, version: input.version }, data: {
-        name: input.name, description: input.description ?? null, servings: input.servings,
-        prepMinutes: input.prepMinutes, cookMinutes: input.cookMinutes, favorite: input.favorite,
-        tags: input.tags, version: { increment: 1 }
-      }});
+      const changed = await tx.recipe.updateMany({
+        where: { id: recipeId, householdId, version: input.version },
+        data: {
+          name: input.name, description: input.description ?? null,
+          servings: input.servings, prepMinutes: input.prepMinutes,
+          cookMinutes: input.cookMinutes, favorite: input.favorite,
+          tags: input.tags, version: { increment: 1 }
+        }
+      });
       if (changed.count !== 1) throw errors.conflict();
       await tx.recipeIngredient.deleteMany({ where: { recipeId } });
-      await tx.recipeIngredient.createMany({ data: input.ingredients.map((x, i) => ({ recipeId, ...x, sortOrder: i })) });
-      await auditAndPublish(tx as any, request, householdId, recipeId, "recipe.updated");
+      await tx.recipeIngredient.createMany({ data: input.ingredients.map((value, index) => ({
+        recipeId, ...value, sortOrder: index
+      })) });
+      await auditAndPublish(tx, request, householdId, recipeId, "recipe.updated");
       return tx.recipe.findUniqueOrThrow({ where: { id: recipeId }, include });
     });
   });
@@ -94,7 +118,7 @@ export async function recipeRoutes(app: FastifyInstance): Promise<void> {
     await db.$transaction(async tx => {
       const deleted = await tx.recipe.deleteMany({ where: { id: recipeId, householdId, version } });
       if (deleted.count !== 1) throw errors.conflict();
-      await auditAndPublish(tx as any, request, householdId, recipeId, "recipe.deleted");
+      await auditAndPublish(tx, request, householdId, recipeId, "recipe.deleted");
     });
     return reply.code(204).send();
   });
