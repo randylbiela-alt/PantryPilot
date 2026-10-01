@@ -1,4 +1,4 @@
-﻿import { randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { FastifyReply } from "fastify";
 import type { Config } from "./config.js";
 import { hashToken } from "./security.js";
@@ -21,17 +21,16 @@ export function sessionCookieOptions(
 ) {
   const production =
     config.NODE_ENV === "production";
-  console.log(
-    "COOKIE ENV",
-  {
-  nodeEnv: config.NODE_ENV
-  }
-  );
+
   return {
     path: "/",
     httpOnly: true,
 
-    // Cross-site cookies for Vercel -> Railway
+    /*
+     * Cross-site cookie support for:
+     * Vercel frontend
+     * Railway backend
+     */
     sameSite: production
       ? ("none" as const)
       : ("lax" as const),
