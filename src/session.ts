@@ -19,24 +19,20 @@ export function sessionCookieOptions(
   config: Config,
   absoluteExpiresAt: Date
 ) {
-  const production =
-    config.NODE_ENV === "production";
-  console.log(
-    "COOKIE ENV",
-  {
-  nodeEnv: config.NODE_ENV
-  }
-  );
+  const crossSite =
+    Boolean(process.env.RAILWAY_ENVIRONMENT_NAME) ||
+    Boolean(process.env.RAILWAY_SERVICE_ID) ||
+    Boolean(process.env.VERCEL);
+
   return {
     path: "/",
     httpOnly: true,
 
-    // Cross-site cookies for Vercel -> Railway
-    sameSite: production
+    sameSite: crossSite
       ? ("none" as const)
       : ("lax" as const),
 
-    secure: production,
+    secure: crossSite,
 
     expires: absoluteExpiresAt
   };
@@ -62,18 +58,20 @@ export function clearSessionCookie(
   reply: FastifyReply,
   config: Config
 ): void {
-  const production =
-    config.NODE_ENV === "production";
+  const crossSite =
+    Boolean(process.env.RAILWAY_ENVIRONMENT_NAME) ||
+    Boolean(process.env.RAILWAY_SERVICE_ID) ||
+    Boolean(process.env.VERCEL);
 
   reply.clearCookie(
     sessionCookieName(config),
     {
       path: "/",
       httpOnly: true,
-      sameSite: production
+      sameSite: crossSite
         ? ("none" as const)
         : ("lax" as const),
-      secure: production
+      secure: crossSite
     }
   );
 }
