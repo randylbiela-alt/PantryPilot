@@ -1,5 +1,3 @@
-import { mealPlanningRoutes } from "./meal-planning.js";
-import { recipeRoutes } from "./recipes.js";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -203,8 +201,6 @@ export async function buildApp(overrides?: Partial<Config>) {
   await pantryRoutes(app);
   await groceryRoutes(app);
   await onboardingRoutes(app);
-  await mealPlanningRoutes(app);
-  await recipeRoutes(app);
 
   app.setErrorHandler((error, request, reply) => {
     const status =
