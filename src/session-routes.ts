@@ -8,9 +8,13 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     if (app.config.NODE_ENV === "production" || !app.config.ALLOW_DEV_AUTH) {
       throw errors.notFound();
     }
-
+    console.log("DEV SESSION START");
     const user = await db.user.findFirst({ where: { primaryEmail: "demo@pantrypilot.test" } });
-    if (!user) throw errors.unauthorized();
+    console.log("DEV USER:", user);
+ 
+    if (!user) {
+	   throw errors.unauthorized();
+    }
 
     const now = new Date();
     const absoluteExpiresAt = new Date(now.getTime() + app.config.SESSION_ABSOLUTE_TTL_SECONDS * 1000);
@@ -19,7 +23,8 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
       absoluteExpiresAt.getTime()
     ));
     const token = newSessionToken();
-
+    
+    console.log("CREATING SESSION FOR:", user.id);
     await db.userSession.create({
       data: {
         userId: user.id,
