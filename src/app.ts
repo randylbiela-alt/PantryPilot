@@ -22,6 +22,7 @@ import { intelligenceRoutes } from "./intelligence.js";
 import { receiptImportRoutes } from "./receipt-import.js";
 import { observabilityRoutes } from "./observability.js";
 import { forecastingRoutes } from "./forecasting.js";
+import { inventoryHistoryRoutes } from "./inventory-history.js";
 
 declare module "fastify" { interface FastifyInstance { config: Config; } }
 
@@ -68,6 +69,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   await receiptImportRoutes(app);
   await observabilityRoutes(app);
   await forecastingRoutes(app);
+  await inventoryHistoryRoutes(app);
   app.setErrorHandler((error, request, reply) => {
     const status = error instanceof AppError ? error.status : error instanceof ZodError ? 400 : typeof (error as { statusCode?: number }).statusCode === "number" ? (error as { statusCode: number }).statusCode : 500;
     const code = error instanceof AppError ? error.code : error instanceof ZodError ? "VALIDATION_FAILED" : status < 500 ? "REQUEST_FAILED" : "INTERNAL_ERROR";
@@ -76,5 +78,6 @@ export async function buildApp(overrides?: Partial<Config>) {
   });
   return app;
 }
+
 
 
