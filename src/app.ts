@@ -24,6 +24,7 @@ import { observabilityRoutes } from "./observability.js";
 import { forecastingRoutes } from "./forecasting.js";
 import { inventoryHistoryRoutes } from "./inventory-history.js";
 import { consumptionAnalyticsRoutes } from "./consumption-analytics.js";
+import { wasteAnalyticsRoutes } from "./waste-analytics.js";
 
 declare module "fastify" { interface FastifyInstance { config: Config; } }
 
@@ -72,6 +73,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   await forecastingRoutes(app);
   await inventoryHistoryRoutes(app);
   await consumptionAnalyticsRoutes(app);
+  await wasteAnalyticsRoutes(app);
   app.setErrorHandler((error, request, reply) => {
     const status = error instanceof AppError ? error.status : error instanceof ZodError ? 400 : typeof (error as { statusCode?: number }).statusCode === "number" ? (error as { statusCode: number }).statusCode : 500;
     const code = error instanceof AppError ? error.code : error instanceof ZodError ? "VALIDATION_FAILED" : status < 500 ? "REQUEST_FAILED" : "INTERNAL_ERROR";
