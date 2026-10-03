@@ -4,7 +4,7 @@ import { clearSessionCookie, newSessionToken, setSessionCookie, tokenHash } from
 import { errors } from "./errors.js";
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/api/v1/auth/dev-session", async (request, reply) => {
+  app.get("/api/v1/auth/dev-session", async (request, reply) => {
     if (!app.config.ALLOW_DEV_AUTH) {
       throw errors.notFound();
     }
@@ -68,6 +68,7 @@ export async function sessionRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 }
+
 
 
 
