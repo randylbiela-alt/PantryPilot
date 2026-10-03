@@ -1,4 +1,4 @@
-﻿import fp from "fastify-plugin";
+import fp from "fastify-plugin";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { IdentityProvider } from "@prisma/client";
 import { db } from "./db.js";
@@ -29,7 +29,9 @@ export default fp(async function authenticationPlugin(app) {
       request.url.startsWith("/health") ||
       request.url.startsWith("/docs") ||
       request.url === "/openapi.json" ||
-      request.url === "/api/v1/auth/dev-session";
+      request.url === "/api/v1/auth/dev-session" ||
+      request.url.startsWith("/api/v1/auth/microsoft/") ||
+      request.url.startsWith("/api/v1/auth/google/");
 
     if (publicRoute) {
       return;

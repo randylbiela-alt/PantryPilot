@@ -25,6 +25,7 @@ import { forecastingRoutes } from "./forecasting.js";
 import { inventoryHistoryRoutes } from "./inventory-history.js";
 import { consumptionAnalyticsRoutes } from "./consumption-analytics.js";
 import { wasteAnalyticsRoutes } from "./waste-analytics.js";
+import { oauthRoutes } from "./oauth-routes.js";
 
 declare module "fastify" { interface FastifyInstance { config: Config; } }
 
@@ -47,6 +48,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   app.get("/health", async () => ({ status: "ok" }));
   await app.register(auth);
   await sessionRoutes(app);
+  await oauthRoutes(app);
   app.get("/api/v1/auth/session", async request => ({ user: request.authUser ? { id: request.authUser.id, email: request.authUser.primaryEmail, displayName: request.authUser.displayName } : null }));
   app.get("/api/v1/bootstrap", async request => {
     const userId = request.authUser!.id;
