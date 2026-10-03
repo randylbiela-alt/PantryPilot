@@ -1,10 +1,10 @@
-﻿import type { FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { db } from "./db.js";
 import { clearSessionCookie, newSessionToken, setSessionCookie, tokenHash } from "./session.js";
 import { errors } from "./errors.js";
 
 export async function sessionRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/api/v1/auth/dev-session", async (request, reply) => {
+  app.post("/api/v1/auth/dev-session", async (request, reply) => {
     if (!app.config.ALLOW_DEV_AUTH) {
       throw errors.notFound();
     }
