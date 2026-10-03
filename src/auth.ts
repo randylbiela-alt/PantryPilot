@@ -41,6 +41,22 @@ export default fp(async function authenticationPlugin(app) {
       request.cookies["__Host-pantrypilot-session"] ??
       request.cookies["pantrypilot-session"];
 
+    request.log.info(
+      {
+        authCookieDebug: {
+          url: request.url,
+          cookieNames: Object.keys(request.cookies),
+          hostCookiePresent: Boolean(
+            request.cookies["__Host-pantrypilot-session"]
+          ),
+          legacyCookiePresent: Boolean(
+            request.cookies["pantrypilot-session"]
+          )
+        }
+      },
+      "AUTH COOKIE DEBUG"
+    );
+
     if (rawSession) {
       const now = new Date();
 
