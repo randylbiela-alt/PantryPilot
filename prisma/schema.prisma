@@ -37,6 +37,13 @@ enum MembershipStatus {
   REMOVED
 }
 
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
 enum GroceryListStatus {
   ACTIVE
   COMPLETED
@@ -58,17 +65,19 @@ enum MealType {
 }
 
 model User {
-  id           String             @id @default(uuid()) @db.Uuid
-  displayName  String?
-  primaryEmail String?
-  status       UserStatus         @default(ACTIVE)
-  identities   ExternalIdentity[]
-  sessions     UserSession[]
-  profile      UserProfile?
-  memberships  HouseholdMember[]
-  createdAt    DateTime           @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime           @updatedAt @db.Timestamptz(6)
-  lastLoginAt  DateTime?          @db.Timestamptz(6)
+  id              String             @id @default(uuid()) @db.Uuid
+  displayName     String?
+  primaryEmail    String?
+  status          UserStatus         @default(ACTIVE)
+  identities      ExternalIdentity[]
+  sessions        UserSession[]
+  profile         UserProfile?
+  memberships     HouseholdMember[]
+  invitesSent     HouseholdInvite[]  @relation("InviteCreator")
+  invitesAccepted HouseholdInvite[]  @relation("InviteAcceptor")
+  createdAt       DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(6)
+  lastLoginAt     DateTime?          @db.Timestamptz(6)
 }
 
 model ExternalIdentity {
@@ -126,6 +135,7 @@ model Household {
   groceryLists    GroceryList[]
   mealPlans       MealPlan[]
   recipes         Recipe[]
+  invites         HouseholdInvite[]
   createdAt       DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime          @updatedAt @db.Timestamptz(6)
 }
@@ -310,4 +320,43 @@ model InventoryEvent {
   @@index([householdId, occurredAt])
   @@index([pantryItemId, occurredAt])
   @@index([householdId, type, occurredAt])
+}
+
+model AuthFlow {
+  id              String           @id @default(uuid()) @db.Uuid
+  provider        IdentityProvider
+  stateHash       String           @unique
+  nonce           String
+  pkceVerifier    String
+  inviteTokenHash String?
+  returnUrl       String
+  expiresAt       DateTime         @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(6)
+
+  @@index([provider, expiresAt])
+  @@index([expiresAt])
+}
+
+model HouseholdInvite {
+  id               String        @id @default(uuid()) @db.Uuid
+  householdId      String        @db.Uuid
+  email            String
+  normalizedEmail  String
+  role             HouseholdRole @default(MEMBER)
+  status           InviteStatus  @default(PENDING)
+  tokenHash        String        @unique
+  invitedByUserId  String        @db.Uuid
+  acceptedByUserId String?       @db.Uuid
+  expiresAt        DateTime      @db.Timestamptz(6)
+  acceptedAt       DateTime?     @db.Timestamptz(6)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(6)
+  household        Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  invitedByUser    User          @relation("InviteCreator", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  acceptedByUser   User?         @relation("InviteAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([householdId, status, expiresAt])
+  @@index([normalizedEmail, status])
+  @@index([invitedByUserId])
+  @@index([acceptedByUserId])
 }

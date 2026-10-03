@@ -1,0 +1,41 @@
+PantryPilot Resume Notes
+
+Backend Repo:
+C:\Projects\PantryPilot
+
+Frontend Repo:
+C:\Projects\PantryPilot-Web
+
+Backend Branch:
+release/v1.0
+
+Frontend Branch:
+feature/intelligence-dashboard
+
+Current State:
+- Local Development Sign-In working
+- Railway healthy
+- Vercel healthy
+- Inventory History working
+- Consumption Analytics working
+- Waste Analytics working
+- Friend testing in progress
+- OAuth temporarily disabled
+- oauth-routes.ts renamed to oauth-routes.disabled
+
+Environment:
+Frontend:
+NEXT_PUBLIC_DEPLOYMENT_ENV=local
+NEXT_PUBLIC_ALLOW_DEV_AUTH=true
+
+Backend:
+NODE_ENV=production
+ALLOW_DEV_AUTH=true
+
+Next Planned Work:
+1. Verify login persistence on all devices
+2. Re-enable OAuth correctly
+3. Add AuthFlow and HouseholdInvite schema models
+4. Configure Microsoft OAuth
+5. Configure Google OAuth
+6. External tester onboarding
