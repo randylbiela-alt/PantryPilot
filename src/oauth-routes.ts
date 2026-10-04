@@ -67,14 +67,18 @@ async function provisionIdentity(appConfig: FastifyInstance["config"], input: { 
 
 export async function oauthRoutes(app: FastifyInstance): Promise<void> {
   const frontend = app.config.FRONTEND_APP_URL ?? app.config.CORS_ORIGIN;
+  const firstPartyCallback = (provider: "microsoft" | "google") =>
+    new URL(`/api/v1/auth/${provider}/callback`, frontend).toString();
+  const microsoftCallback = app.config.MICROSOFT_CALLBACK_URL ?? firstPartyCallback("microsoft");
+  const googleCallback = app.config.GOOGLE_CALLBACK_URL ?? firstPartyCallback("google");
   const crypto = new CryptoProvider();
   const microsoft = () => new ConfidentialClientApplication({ auth: { clientId: app.config.MICROSOFT_CLIENT_ID ?? "", clientSecret: app.config.MICROSOFT_CLIENT_SECRET ?? "", authority: app.config.MICROSOFT_AUTHORITY ?? "https://login.microsoftonline.com/common" } });
 
   app.get("/api/v1/auth/microsoft/start", async (request, reply) => {
-    if (!app.config.MICROSOFT_CLIENT_ID || !app.config.MICROSOFT_CLIENT_SECRET || !app.config.MICROSOFT_CALLBACK_URL) throw new AppError(503, "MICROSOFT_LOGIN_UNAVAILABLE", "Microsoft sign-in is not configured.");
+    if (!app.config.MICROSOFT_CLIENT_ID || !app.config.MICROSOFT_CLIENT_SECRET) throw new AppError(503, "MICROSOFT_LOGIN_UNAVAILABLE", "Microsoft sign-in is not configured.");
     const query = startQuery.parse(request.query); const state = randomToken(); const nonce = randomToken(); const { verifier, challenge } = await crypto.generatePkceCodes();
     await db.authFlow.create({ data: { provider: "MICROSOFT", stateHash: hashToken(state, app.config.SESSION_PEPPER), nonce, pkceVerifier: verifier, inviteTokenHash: query.invite ? hashToken(query.invite, app.config.SESSION_PEPPER) : null, returnUrl: safeReturnUrl(query.returnUrl, frontend), expiresAt: new Date(Date.now() + 10 * 60 * 1000) } });
-    const url = await microsoft().getAuthCodeUrl({ redirectUri: app.config.MICROSOFT_CALLBACK_URL, scopes: ["openid","profile","email"], state, nonce, codeChallenge: challenge, codeChallengeMethod: "S256", prompt: "select_account" });
+    const url = await microsoft().getAuthCodeUrl({ redirectUri: microsoftCallback, scopes: ["openid","profile","email"], state, nonce, codeChallenge: challenge, codeChallengeMethod: "S256", prompt: "select_account" });
     return reply.redirect(url);
   });
 
@@ -82,7 +86,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const query = callbackQuery.parse(request.query); if (query.error) throw new AppError(401, "OAUTH_PROVIDER_ERROR", query.error_description ?? "The identity provider rejected the sign-in request."); if (!query.code) throw errors.unauthorized(); const flow = await db.authFlow.findUnique({ where: { stateHash: hashToken(query.state, app.config.SESSION_PEPPER) } });
     if (!flow || flow.provider !== "MICROSOFT" || flow.expiresAt <= new Date()) throw new AppError(400, "AUTH_FLOW_INVALID", "The sign-in request is invalid or expired.");
     await db.authFlow.delete({ where: { id: flow.id } });
-    const result = await microsoft().acquireTokenByCode({ code: query.code, redirectUri: app.config.MICROSOFT_CALLBACK_URL!, scopes: ["openid","profile","email"], codeVerifier: flow.pkceVerifier });
+    const result = await microsoft().acquireTokenByCode({ code: query.code, redirectUri: microsoftCallback, scopes: ["openid","profile","email"], codeVerifier: flow.pkceVerifier });
     const claims = result.idTokenClaims as Record<string, unknown> | undefined; if (claims?.nonce !== flow.nonce) throw errors.unauthorized(); const subject = typeof claims?.sub === "string" ? claims.sub : null; if (!subject) throw errors.unauthorized();
     const email = typeof claims?.email === "string" ? claims.email : typeof claims?.preferred_username === "string" ? claims.preferred_username : null;
     const user = await provisionIdentity(app.config, { provider: IdentityProvider.MICROSOFT, issuer: typeof claims?.iss === "string" ? claims.iss : (app.config.MICROSOFT_AUTHORITY ?? "microsoft"), subject, email, emailVerified: true, displayName: typeof claims?.name === "string" ? claims.name : null, inviteTokenHash: flow.inviteTokenHash });
@@ -90,16 +94,16 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/api/v1/auth/google/start", async (request, reply) => {
-    if (!app.config.GOOGLE_CLIENT_ID || !app.config.GOOGLE_CLIENT_SECRET || !app.config.GOOGLE_CALLBACK_URL) throw new AppError(503, "GOOGLE_LOGIN_UNAVAILABLE", "Google sign-in is not configured.");
+    if (!app.config.GOOGLE_CLIENT_ID || !app.config.GOOGLE_CLIENT_SECRET) throw new AppError(503, "GOOGLE_LOGIN_UNAVAILABLE", "Google sign-in is not configured.");
     const query = startQuery.parse(request.query); const state = randomToken(); const nonce = randomToken(); const verifier = randomToken(); const challenge = createHash("sha256").update(verifier).digest("base64url");
     await db.authFlow.create({ data: { provider: "GOOGLE", stateHash: hashToken(state, app.config.SESSION_PEPPER), nonce, pkceVerifier: verifier, inviteTokenHash: query.invite ? hashToken(query.invite, app.config.SESSION_PEPPER) : null, returnUrl: safeReturnUrl(query.returnUrl, frontend), expiresAt: new Date(Date.now() + 10 * 60 * 1000) } });
-    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth"); url.searchParams.set("client_id", app.config.GOOGLE_CLIENT_ID); url.searchParams.set("redirect_uri", app.config.GOOGLE_CALLBACK_URL); url.searchParams.set("response_type", "code"); url.searchParams.set("scope", "openid email profile"); url.searchParams.set("state", state); url.searchParams.set("nonce", nonce); url.searchParams.set("code_challenge", challenge); url.searchParams.set("code_challenge_method", "S256"); url.searchParams.set("prompt", "select_account"); return reply.redirect(url.toString());
+    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth"); url.searchParams.set("client_id", app.config.GOOGLE_CLIENT_ID); url.searchParams.set("redirect_uri", googleCallback); url.searchParams.set("response_type", "code"); url.searchParams.set("scope", "openid email profile"); url.searchParams.set("state", state); url.searchParams.set("nonce", nonce); url.searchParams.set("code_challenge", challenge); url.searchParams.set("code_challenge_method", "S256"); url.searchParams.set("prompt", "select_account"); return reply.redirect(url.toString());
   });
 
   app.get("/api/v1/auth/google/callback", async (request, reply) => {
     const query = callbackQuery.parse(request.query); if (query.error) throw new AppError(401, "OAUTH_PROVIDER_ERROR", query.error_description ?? "The identity provider rejected the sign-in request."); if (!query.code) throw errors.unauthorized(); const flow = await db.authFlow.findUnique({ where: { stateHash: hashToken(query.state, app.config.SESSION_PEPPER) } });
     if (!flow || flow.provider !== "GOOGLE" || flow.expiresAt <= new Date()) throw new AppError(400, "AUTH_FLOW_INVALID", "The sign-in request is invalid or expired."); await db.authFlow.delete({ where: { id: flow.id } });
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: query.code, client_id: app.config.GOOGLE_CLIENT_ID!, client_secret: app.config.GOOGLE_CLIENT_SECRET!, redirect_uri: app.config.GOOGLE_CALLBACK_URL!, grant_type: "authorization_code", code_verifier: flow.pkceVerifier }) });
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: query.code, client_id: app.config.GOOGLE_CLIENT_ID!, client_secret: app.config.GOOGLE_CLIENT_SECRET!, redirect_uri: googleCallback, grant_type: "authorization_code", code_verifier: flow.pkceVerifier }) });
     if (!tokenResponse.ok) throw errors.unauthorized(); const tokens = await tokenResponse.json() as { id_token?: string }; if (!tokens.id_token) throw errors.unauthorized();
     const jwks = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs")); const { payload } = await jwtVerify(tokens.id_token, jwks, { issuer: ["https://accounts.google.com","accounts.google.com"], audience: app.config.GOOGLE_CLIENT_ID! }); if (payload.nonce !== flow.nonce || !payload.sub) throw errors.unauthorized();
     const user = await provisionIdentity(app.config, { provider: IdentityProvider.GOOGLE, issuer: String(payload.iss), subject: payload.sub, email: typeof payload.email === "string" ? payload.email : null, emailVerified: payload.email_verified === true, displayName: typeof payload.name === "string" ? payload.name : null, inviteTokenHash: flow.inviteTokenHash });
