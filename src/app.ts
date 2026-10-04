@@ -1,4 +1,4 @@
-import Fastify from "fastify";
+﻿import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -16,6 +16,7 @@ import { groceryRoutes } from "./grocery.js";
 import { onboardingRoutes } from "./onboarding.js";
 import { sessionRoutes } from "./session-routes.js";
 import { oauthRoutes } from "./oauth-routes.js";
+import { collaborationRoutes } from "./collaboration-routes.js";
 import { mealPlanningRoutes } from "./meal-planning.js";
 import { recipeRoutes } from "./recipes.js";
 import { groceryGenerationRoutes } from "./grocery-generation.js";
@@ -49,6 +50,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   await app.register(auth);
   await sessionRoutes(app);
   await oauthRoutes(app);
+  await collaborationRoutes(app);
   app.get("/api/v1/auth/session", async request => ({ user: request.authUser ? { id: request.authUser.id, email: request.authUser.primaryEmail, displayName: request.authUser.displayName } : null }));
   app.get("/api/v1/bootstrap", async request => {
     const userId = request.authUser!.id;
@@ -84,6 +86,8 @@ export async function buildApp(overrides?: Partial<Config>) {
   });
   return app;
 }
+
+
 
 
 
