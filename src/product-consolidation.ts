@@ -32,35 +32,32 @@ function relatedNames(left: string, right: string): boolean {
   const leftCanonical = canonicalProductName(left);
   const rightCanonical = canonicalProductName(right);
   if (leftCanonical === rightCanonical) return true;
-  const leftTokens = tokens(left);
-  const rightTokens = tokens(right);
-  if (!leftTokens.size || !rightTokens.size) return false;
-  const common = [...leftTokens].filter(token => rightTokens.has(token)).length;
-  const smaller = Math.min(leftTokens.size, rightTokens.size);
-  return common === smaller || common / Math.max(leftTokens.size, rightTokens.size) >= 0.67;
+
+  const leftTokens = [...tokens(left)];
+  const rightTokens = [...tokens(right)];
+  if (!leftTokens.length || !rightTokens.length) return false;
+
+  const shorter = leftTokens.length <= rightTokens.length ? leftTokens : rightTokens;
+  const longer = leftTokens.length <= rightTokens.length ? rightTokens : leftTokens;
+  const additionalTokens = longer.filter(token => !shorter.includes(token));
+  const allShorterTokensMatch = shorter.every(token => longer.includes(token));
+
+  // A single descriptive modifier is reviewable, such as
+  // "Parmesan" and "Parmesan Cheese". Longer compound products such as
+  // "Chicken" and "Progresso Hearty Chicken & Rotini" are excluded.
+  return allShorterTokensMatch && additionalTokens.length === 1;
 }
 
-function buildGroups(items: CandidateItem[]) {
-  const parent = items.map((_, index) => index);
-  const find = (index: number): number => parent[index] === index ? index : (parent[index] = find(parent[index]!));
-  const join = (left: number, right: number) => {
-    const leftRoot = find(left);
-    const rightRoot = find(right);
-    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
-  };
+function buildPairs(items: CandidateItem[]) {
+  const pairs: CandidateItem[][] = [];
   for (let left = 0; left < items.length; left += 1) {
     for (let right = left + 1; right < items.length; right += 1) {
-      if (relatedNames(items[left]!.name, items[right]!.name)) join(left, right);
+      if (relatedNames(items[left]!.name, items[right]!.name)) {
+        pairs.push([items[left]!, items[right]!]);
+      }
     }
   }
-  const groups = new Map<number, CandidateItem[]>();
-  items.forEach((item, index) => {
-    const root = find(index);
-    const group = groups.get(root) ?? [];
-    group.push(item);
-    groups.set(root, group);
-  });
-  return [...groups.values()].filter(group => group.length > 1);
+  return pairs;
 }
 
 export async function productConsolidationRoutes(app: FastifyInstance): Promise<void> {
@@ -72,7 +69,7 @@ export async function productConsolidationRoutes(app: FastifyInstance): Promise<
       orderBy: { name: "asc" },
       select: { id: true, name: true, quantity: true, unit: true, category: true, version: true }
     });
-    return buildGroups(items).map(group => {
+    return buildPairs(items).map(group => {
       const canonicalNames = new Set(group.map(item => canonicalProductName(item.name)));
       const normalizedUnits = new Set(group.map(item => normalizedUnit(item.unit)));
       const confidence = canonicalNames.size === 1 ? "HIGH" : "REVIEW";
