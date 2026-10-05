@@ -55,11 +55,23 @@ export async function productConsolidationRoutes(app: FastifyInstance): Promise<
       const canonicalNames = new Set(group.map(item => canonicalProductName(item.name)));
       const normalizedUnits = new Set(group.map(item => normalizedUnit(item.unit)));
       const mergeCount = learned.get(pairKey) ?? 0;
-      const confidence = canonicalNames.size === 1 || mergeCount >= 2 ? "HIGH" : "REVIEW";
+      const exactCanonicalMatch = canonicalNames.size === 1;
+      const unitMatch = normalizedUnits.size === 1;
+      const confidenceScore = Math.min(
+        100,
+        (exactCanonicalMatch ? 60 : 35) +
+          (unitMatch ? 20 : 0) +
+          Math.min(20, mergeCount * 10)
+      );
+      const confidence = confidenceScore >= 80 ? "HIGH" : confidenceScore >= 55 ? "MEDIUM" : "LOW";
+      const matchReason = mergeCount > 0
+        ? `Learned from ${mergeCount} prior merge${mergeCount === 1 ? "" : "s"}`
+        : exactCanonicalMatch
+          ? unitMatch ? "Same product name and unit" : "Same product name with different units"
+          : unitMatch ? "Related product names with matching units" : "Related product names requiring review";
       return [{
         key: group.map(item => item.id).sort().join("|"), canonicalName: canonicalProductName(group[0]!.name),
-        leftProduct, rightProduct, confidence,
-        matchReason: mergeCount ? `Learned from ${mergeCount} prior merge${mergeCount === 1 ? "" : "s"}` : confidence === "HIGH" ? "Same canonical product name" : "Related product names",
+        leftProduct, rightProduct, confidence, confidenceScore, matchReason,
         mergeCount, unitConflict: normalizedUnits.size > 1,
         availableNames: [...new Set(group.map(item => item.name))], availableUnits: [...new Set(group.map(item => item.unit))], items: group
       }];
