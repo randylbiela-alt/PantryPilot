@@ -81,6 +81,8 @@ model Household {
   mealPlans       MealPlan[]
   pantryItems     PantryItem[]
   recipes         Recipe[]
+  consolidationSuppressions ConsolidationSuppression[]
+  consolidationLearnings ConsolidationLearning[]
 }
 
 model HouseholdMember {
@@ -114,6 +116,34 @@ model PantryItem {
 
   @@index([householdId, normalizedName])
   @@index([householdId, expirationDate])
+}
+
+
+model ConsolidationSuppression {
+  id             String    @id @default(uuid()) @db.Uuid
+  householdId    String    @db.Uuid
+  leftProduct    String
+  rightProduct   String
+  createdByUserId String   @db.Uuid
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+  household      Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, leftProduct, rightProduct])
+  @@index([householdId, createdAt])
+}
+
+model ConsolidationLearning {
+  id             String    @id @default(uuid()) @db.Uuid
+  householdId    String    @db.Uuid
+  leftProduct    String
+  rightProduct   String
+  mergeCount     Int       @default(1)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(6)
+  household      Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, leftProduct, rightProduct])
+  @@index([householdId, mergeCount])
 }
 
 model GroceryList {
