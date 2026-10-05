@@ -19,6 +19,7 @@ import { oauthRoutes } from "./oauth-routes.js";
 import { collaborationRoutes } from "./collaboration-routes.js";
 import { mealPlanningRoutes } from "./meal-planning.js";
 import { recipeRoutes } from "./recipes.js";
+import { recipeMatchingRoutes } from "./recipe-matching.js";
 import { groceryGenerationRoutes } from "./grocery-generation.js";
 import { intelligenceRoutes } from "./intelligence.js";
 import { receiptImportRoutes } from "./receipt-import.js";
@@ -71,6 +72,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   await onboardingRoutes(app);
   await mealPlanningRoutes(app);
   await recipeRoutes(app);
+  await recipeMatchingRoutes(app);
   await groceryGenerationRoutes(app);
   await intelligenceRoutes(app);
   await receiptImportRoutes(app);
