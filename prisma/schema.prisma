@@ -179,11 +179,6 @@ model Recipe {
   householdId  String             @db.Uuid
   name         String
   description  String?
-
-  instructions String?
-  imageUrl     String?
-  source       String?
-
   servings     Int                @default(4)
   prepMinutes  Int                @default(0)
   cookMinutes  Int                @default(0)
@@ -192,6 +187,9 @@ model Recipe {
   version      Int                @default(1)
   createdAt    DateTime           @default(now()) @db.Timestamptz(6)
   updatedAt    DateTime           @updatedAt @db.Timestamptz(6)
+  instructions String?
+  imageUrl     String?
+  source       String?
   plannedMeals PlannedMeal[]
   household    Household          @relation(fields: [householdId], references: [id], onDelete: Cascade)
   ingredients  RecipeIngredient[]
@@ -365,4 +363,3 @@ enum InventoryEventType {
   EXPIRED
   ARCHIVED
 }
-
