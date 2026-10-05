@@ -24,6 +24,7 @@ import { groceryGenerationRoutes } from "./grocery-generation.js";
 import { intelligenceRoutes } from "./intelligence.js";
 import { receiptImportRoutes } from "./receipt-import.js";
 import { recipeImportRoutes } from "./recipe-import.js";
+import { recipeUrlImportRoutes } from "./recipe-url-import.js";
 import { observabilityRoutes } from "./observability.js";
 import { forecastingRoutes } from "./forecasting.js";
 import { inventoryHistoryRoutes } from "./inventory-history.js";
@@ -77,6 +78,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   await intelligenceRoutes(app);
   await receiptImportRoutes(app);
   await recipeImportRoutes(app);
+  await recipeUrlImportRoutes(app);
   await observabilityRoutes(app);
   await forecastingRoutes(app);
   await inventoryHistoryRoutes(app);
