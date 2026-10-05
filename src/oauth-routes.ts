@@ -159,8 +159,30 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: query.code, client_id: app.config.GOOGLE_CLIENT_ID!, client_secret: app.config.GOOGLE_CLIENT_SECRET!, redirect_uri: googleCallback, grant_type: "authorization_code", code_verifier: flow.pkceVerifier }) });
     if (!tokenResponse.ok) throw errors.unauthorized(); const tokens = await tokenResponse.json() as { id_token?: string }; if (!tokens.id_token) throw errors.unauthorized();
     const jwks = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs")); const { payload } = await jwtVerify(tokens.id_token, jwks, { issuer: ["https://accounts.google.com","accounts.google.com"], audience: app.config.GOOGLE_CLIENT_ID! }); if (payload.nonce !== flow.nonce || !payload.sub) throw errors.unauthorized();
-    const user = await provisionIdentity(app.config, { provider: IdentityProvider.GOOGLE, issuer: String(payload.iss), subject: payload.sub, email: typeof payload.email === "string" ? payload.email : null, emailVerified: payload.email_verified === true, displayName: typeof payload.name === "string" ? payload.name : null, inviteTokenHash: flow.inviteTokenHash });
-    await replacePantrySession(app, request, reply, user.id); return reply.redirect(flow.returnUrl);
+    const googleEmail = typeof payload.email === "string" ? payload.email : null;
+    const googleDisplayName = typeof payload.name === "string" ? payload.name : null;
+    request.log.info({
+      event: "google_oauth_identity_received",
+      googleEmail,
+      googleDisplayName,
+      emailVerified: payload.email_verified === true,
+      returnOrigin: new URL(flow.returnUrl).origin
+    }, "Google OAuth identity received");
+    const user = await provisionIdentity(app.config, { provider: IdentityProvider.GOOGLE, issuer: String(payload.iss), subject: payload.sub, email: googleEmail, emailVerified: payload.email_verified === true, displayName: googleDisplayName, inviteTokenHash: flow.inviteTokenHash });
+    request.log.info({
+      event: "google_oauth_user_resolved",
+      googleEmail,
+      resolvedUserId: user.id,
+      resolvedUserEmail: user.primaryEmail,
+      resolvedDisplayName: user.displayName
+    }, "Google OAuth PantryPilot user resolved");
+    await replacePantrySession(app, request, reply, user.id);
+    request.log.info({
+      event: "google_oauth_session_replaced",
+      resolvedUserId: user.id,
+      resolvedUserEmail: user.primaryEmail
+    }, "Google OAuth session replaced");
+    return reply.redirect(flow.returnUrl);
   });
 
   app.post("/api/v1/households/:householdId/invites", async (request, reply) => {
