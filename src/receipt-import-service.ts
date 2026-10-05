@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type { ReceiptImportItem } from "./receipt-types.js";
+import { canonicalProductName, cleanProductName, normalizedUnit } from "./product-identity.js";
 
 type ImportResult = {
   created: number;
@@ -26,7 +27,7 @@ export async function importReceiptItems(
   for (const candidate of input) {
     const name = cleanName(candidate.name);
     const unit = cleanName(candidate.unit);
-    const key = `${normalize(name)}|${normalize(unit)}`;
+    const key = `${normalize(name)}|${normalizedUnit(unit)}`;
     const existing = consolidated.get(key);
     if (existing) consolidated.set(key, { ...existing, quantity: existing.quantity + candidate.quantity });
     else consolidated.set(key, { ...candidate, name, unit });
@@ -42,9 +43,9 @@ export async function importReceiptItems(
 
     for (const candidate of consolidated.values()) {
       const candidateName = normalize(candidate.name);
-      const candidateUnit = normalize(candidate.unit);
+      const candidateUnit = normalizedUnit(candidate.unit);
       const match = current.find(item =>
-        item.normalizedName === candidateName && normalize(item.unit) === candidateUnit
+        canonicalProductName(item.name) === candidateName && normalizedUnit(item.unit) === candidateUnit
       );
 
       if (match) {
