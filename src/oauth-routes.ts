@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createHash } from "node:crypto";
 import { ConfidentialClientApplication, CryptoProvider } from "@azure/msal-node";
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -46,6 +46,42 @@ async function createPantrySession(app: FastifyInstance, reply: FastifyReply, us
   const token = newSessionToken();
   await db.userSession.create({ data: { userId, tokenHash: tokenHash(token, app.config), expiresAt, absoluteExpiresAt, lastSeenAt: now, rotatedAt: now } });
   setSessionCookie(reply, app.config, token, absoluteExpiresAt);
+}
+async function replacePantrySession(
+  app: FastifyInstance,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  userId: string
+): Promise<void> {
+  const existingTokens = [
+    request.cookies["__Host-pantrypilot-session"],
+    request.cookies["pantrypilot-session"]
+  ].filter((value): value is string => Boolean(value));
+
+  if (existingTokens.length) {
+    await db.userSession.deleteMany({
+      where: {
+        tokenHash: {
+          in: existingTokens.map(value => tokenHash(value, app.config))
+        }
+      }
+    });
+  }
+
+  reply.clearCookie("__Host-pantrypilot-session", {
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    sameSite: "none"
+  });
+  reply.clearCookie("pantrypilot-session", {
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    sameSite: "none"
+  });
+
+  await createPantrySession(app, reply, userId);
 }
 
 async function consumeInvite(tx: Prisma.TransactionClient, inviteTokenHash: string | null, email: string | null, userId: string) {
@@ -104,7 +140,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const claims = result.idTokenClaims as Record<string, unknown> | undefined; if (claims?.nonce !== flow.nonce) throw errors.unauthorized(); const subject = typeof claims?.sub === "string" ? claims.sub : null; if (!subject) throw errors.unauthorized();
     const email = typeof claims?.email === "string" ? claims.email : typeof claims?.preferred_username === "string" ? claims.preferred_username : null;
     const user = await provisionIdentity(app.config, { provider: IdentityProvider.MICROSOFT, issuer: typeof claims?.iss === "string" ? claims.iss : (app.config.MICROSOFT_AUTHORITY ?? "microsoft"), subject, email, emailVerified: true, displayName: typeof claims?.name === "string" ? claims.name : null, inviteTokenHash: flow.inviteTokenHash });
-    await createPantrySession(app, reply, user.id); return reply.redirect(flow.returnUrl);
+    await replacePantrySession(app, request, reply, user.id); return reply.redirect(flow.returnUrl);
   });
 
   app.get("/api/v1/auth/google/start", async (request, reply) => {
@@ -124,7 +160,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     if (!tokenResponse.ok) throw errors.unauthorized(); const tokens = await tokenResponse.json() as { id_token?: string }; if (!tokens.id_token) throw errors.unauthorized();
     const jwks = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs")); const { payload } = await jwtVerify(tokens.id_token, jwks, { issuer: ["https://accounts.google.com","accounts.google.com"], audience: app.config.GOOGLE_CLIENT_ID! }); if (payload.nonce !== flow.nonce || !payload.sub) throw errors.unauthorized();
     const user = await provisionIdentity(app.config, { provider: IdentityProvider.GOOGLE, issuer: String(payload.iss), subject: payload.sub, email: typeof payload.email === "string" ? payload.email : null, emailVerified: payload.email_verified === true, displayName: typeof payload.name === "string" ? payload.name : null, inviteTokenHash: flow.inviteTokenHash });
-    await createPantrySession(app, reply, user.id); return reply.redirect(flow.returnUrl);
+    await replacePantrySession(app, request, reply, user.id); return reply.redirect(flow.returnUrl);
   });
 
   app.post("/api/v1/households/:householdId/invites", async (request, reply) => {
