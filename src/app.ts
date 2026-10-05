@@ -13,6 +13,7 @@ import auth from "./auth.js";
 import { AppError } from "./errors.js";
 import { pantryRoutes } from "./pantry.js";
 import { groceryRoutes } from "./grocery.js";
+import { pantryPopulationRoutes } from "./pantry-population.js";
 import { onboardingRoutes } from "./onboarding.js";
 import { sessionRoutes } from "./session-routes.js";
 import { oauthRoutes } from "./oauth-routes.js";
@@ -70,6 +71,7 @@ export async function buildApp(overrides?: Partial<Config>) {
   });
   await pantryRoutes(app);
   await groceryRoutes(app);
+  await pantryPopulationRoutes(app);
   await onboardingRoutes(app);
   await mealPlanningRoutes(app);
   await recipeRoutes(app);
