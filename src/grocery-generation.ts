@@ -9,6 +9,18 @@ const params = z.object({ householdId: z.string().uuid() }).strict();
 const body = z.object({ weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict();
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 const weekDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
+const shoppingName = (value: string) => {
+ const canonical = canonicalIngredientName(value);
+ const cleaned = canonical
+  .replace(/\([^)]*(?:optional|to taste|for serving|for garnish|divided)[^)]*\)/gi, " ")
+  .replace(/\b(?:preferably|optional|divided|for serving|for garnish|to taste)\b.*$/gi, " ")
+  .replace(/,\s*(?:roughly\s+|finely\s+|thinly\s+)?(?:chopped|diced|minced|sliced|peeled|crushed|grated|shredded|trimmed|rinsed|drained|seeded|halved|quartered|cubed|cut|softened|melted|cooked|uncooked|skinless|boneless)\b.*$/gi, " ")
+  .replace(/\b(?:skinless|boneless),?\s*/gi, " ")
+  .replace(/\s+/g, " ")
+  .replace(/^\s+|\s+$/g, "")
+  .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "");
+ return cleaned || canonical;
+};
 
 type RequiredIngredient = {
  name: string;
@@ -79,7 +91,7 @@ export async function groceryGenerationRoutes(app: FastifyInstance): Promise<voi
  const current = required.get(key);
  required.set(key, current
  ? { ...current, quantity: current.quantity.plus(quantity) }
- : { name: ingredient.name, normalizedName, unit: ingredient.unit, quantity });
+ : { name: shoppingName(ingredient.name), normalizedName: shoppingName(ingredient.name), unit: ingredient.unit, quantity });
  }
  }
 
