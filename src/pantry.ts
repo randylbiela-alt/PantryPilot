@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { db } from "./db.js";
 import {
  createPantry,
@@ -62,6 +62,21 @@ export async function pantryRoutes(app: FastifyInstance): Promise<void> {
  data: createData,
  select: pantrySelect
  });
+ await transaction.inventoryEvent.create({
+ data: {
+ householdId,
+ pantryItemId: row.id,
+ pantryItemName: row.name,
+ type: "ADDED",
+ quantityBefore: 0,
+ quantityAfter: row.quantity,
+ quantityDelta: row.quantity,
+ unit: row.unit,
+ reason: "Pantry item created",
+ actorUserId: request.authUser!.id,
+ correlationId: request.correlationId
+ }
+ });
 
  await transaction.auditEvent.create({
  data: {
@@ -120,6 +135,8 @@ export async function pantryRoutes(app: FastifyInstance): Promise<void> {
  }
 
  return db.$transaction(async transaction => {
+ const previous = await transaction.pantryItem.findFirst({ where: { id: itemId, householdId, archivedAt: null } });
+ if (!previous) throw errors.notFound();
  const result = await transaction.pantryItem.updateMany({
  where: {
  id: itemId,
@@ -136,6 +153,23 @@ export async function pantryRoutes(app: FastifyInstance): Promise<void> {
  where: { id: itemId },
  select: pantrySelect
  });
+ if (input.quantity !== undefined && !new Prisma.Decimal(row.quantity).equals(previous.quantity)) {
+ await transaction.inventoryEvent.create({
+ data: {
+ householdId,
+ pantryItemId: row.id,
+ pantryItemName: row.name,
+ type: "ADJUSTED",
+ quantityBefore: previous.quantity,
+ quantityAfter: row.quantity,
+ quantityDelta: new Prisma.Decimal(row.quantity).minus(previous.quantity),
+ unit: row.unit,
+ reason: "Pantry quantity updated",
+ actorUserId: request.authUser!.id,
+ correlationId: request.correlationId
+ }
+ });
+ }
 
  await transaction.auditEvent.create({
  data: {
@@ -177,6 +211,16 @@ export async function pantryRoutes(app: FastifyInstance): Promise<void> {
  if (!Number.isInteger(version) || version < 1) throw errors.conflict();
 
  await db.$transaction(async transaction => {
+ const previous = await transaction.pantryItem.findFirst({
+  where: {
+   id: itemId,
+   householdId,
+   archivedAt: null
+  }
+ });
+
+ if (!previous) throw errors.notFound();
+
  const result = await transaction.pantryItem.updateMany({
  where: { id: itemId, householdId, version, archivedAt: null },
  data: {
@@ -187,6 +231,22 @@ export async function pantryRoutes(app: FastifyInstance): Promise<void> {
  });
 
  if (result.count !== 1) throw errors.conflict();
+
+ await transaction.inventoryEvent.create({
+  data: {
+   householdId,
+   pantryItemId: previous.id,
+   pantryItemName: previous.name,
+   type: "ARCHIVED",
+   quantityBefore: previous.quantity,
+   quantityAfter: previous.quantity,
+   quantityDelta: 0,
+   unit: previous.unit,
+   reason: "Pantry item archived",
+   actorUserId: request.authUser!.id,
+   correlationId: request.correlationId
+  }
+ });
 
  await transaction.auditEvent.create({
  data: {
