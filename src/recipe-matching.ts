@@ -8,6 +8,28 @@ import { normalizeName } from "./security.js";
 import { calculateRecommendations, type RecipeRecommendation } from "./intelligence.js";
 
 const params = z.object({ householdId: z.string().uuid(), recipeId: z.string().uuid() }).strict();
+const titleCase = (value: string) => value.split(" ").filter(Boolean).map(word => word.split("-").map(part => part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part).join("-")).join(" ");
+const shoppingAliases = new Map<string, string>([
+ ["celery rib", "celery"], ["celery ribs", "celery"],
+ ["green capsicum", "bell pepper"], ["green capsicum / bell pepper", "bell pepper"], ["capsicum", "bell pepper"],
+ ["crushed canned tomato", "crushed tomatoes"], ["canned crushed tomato", "crushed tomatoes"],
+ ["fresh thyme", "thyme"], ["dried thyme", "thyme"]
+]);
+const shoppingName = (value: string) => {
+ let cleaned = normalizeName(value)
+  .replace(/\([^)]*\)/g, " ")
+  .replace(/\[[^\]]*\]/g, " ")
+  .replace(/\s*\/\s*/g, " / ")
+  .replace(/,\s*(?:preferably|ideally)\b[^,]*/gi, " ")
+  .replace(/,\s*(?:roughly\s+|finely\s+|thinly\s+|thickly\s+|freshly\s+)?(?:chopped|diced|minced|sliced|peeled|crushed|grated|shredded|trimmed|rinsed|drained|seeded|halved|quartered|cubed|cut|softened|melted|cooked|uncooked|torn)\b.*$/gi, " ")
+  .replace(/,\s*(?:skinless|boneless|medium|large|small)\b.*$/gi, " ")
+  .replace(/\b(?:skinless|boneless|uncooked|raw),?\s*/gi, " ")
+  .replace(/\s+/g, " ").trim().replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "");
+ if (/\bor\b/i.test(cleaned)) cleaned = cleaned.split(/\s+or\s+/i)[0] ?? cleaned;
+ if (cleaned.includes(" / ")) cleaned = cleaned.split(" / ").at(-1) ?? cleaned;
+ cleaned = shoppingAliases.get(cleaned.toLowerCase()) ?? cleaned;
+ return titleCase(cleaned || normalizeName(value));
+};
 
 async function calculateMatch(householdId: string, recipeId: string): Promise<RecipeRecommendation> {
  const [recipe, pantry] = await Promise.all([
@@ -44,10 +66,11 @@ export async function recipeMatchingRoutes(app: FastifyInstance): Promise<void> 
  const added: Array<{ id: string; name: string }> = [];
  let skipped = 0;
  for (const ingredient of match.missingIngredients) {
- const normalized = normalizeName(ingredient.name);
+ const productName = shoppingName(ingredient.name);
+ const normalized = normalizeName(productName);
  if (existing.has(normalized)) { skipped += 1; continue; }
  const shortage = new Prisma.Decimal(ingredient.requiredQuantity).minus(ingredient.availableQuantity).toDecimalPlaces(3).toNumber();
- const displayName = `${ingredient.name} (${shortage} ${ingredient.unit})`;
+ const displayName = `${productName} (${shortage} ${ingredient.unit})`;
  const created = await transaction.groceryListItem.create({ data: { groceryListId: list.id, name: displayName, normalizedName: normalized, checked: false } });
  existing.add(normalized);
  added.push({ id: created.id, name: displayName });
