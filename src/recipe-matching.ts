@@ -10,6 +10,9 @@ import { calculateRecommendations, type RecipeRecommendation } from "./intellige
 const params = z.object({ householdId: z.string().uuid(), recipeId: z.string().uuid() }).strict();
 const titleCase = (value: string) => value.split(" ").filter(Boolean).map(word => word.split("-").map(part => part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part).join("-")).join(" ");
 const shoppingAliases = new Map<string, string>([
+ ["andouille", "andouille sausage"], ["andouille sausage", "andouille sausage"],
+ ["andouille or smoked sausage", "andouille sausage"], ["smoked sausage", "smoked sausage"],
+ ["kielbasa", "kielbasa sausage"], ["polish sausage", "polish sausage"],
  ["celery rib", "celery"], ["celery ribs", "celery"],
  ["green capsicum", "bell pepper"], ["green capsicum / bell pepper", "bell pepper"], ["capsicum", "bell pepper"],
  ["crushed canned tomato", "crushed tomatoes"], ["canned crushed tomato", "crushed tomatoes"],
