@@ -71,7 +71,10 @@ const presenceOnlyNames = new Set([
   "red pepper flakes", "rosemary", "sage", "seasoning salt", "thyme", "turmeric",
   "all purpose flour", "baking powder", "baking soda", "breadcrumbs", "brown sugar", "cornmeal",
   "cornstarch", "flour", "granulated sugar", "oats", "olive oil", "powdered sugar", "rolled oats",
-  "salt", "sugar", "vegetable oil", "yeast"
+  "salt", "sugar", "vegetable oil", "yeast",
+  "garlic", "onion", "green onions", "shallot", "ginger", "lemon", "lime",
+  "butter", "soy sauce", "worcestershire sauce", "hot sauce", "vinegar",
+  "apple cider vinegar", "balsamic vinegar", "red wine vinegar", "white vinegar", "rice vinegar"
 ]);
 
 const families: Array<{ name: string; members: string[] }> = [
