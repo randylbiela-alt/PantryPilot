@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "./db.js";
 import { requireHousehold } from "./authorize.js";
+import { canonicalIngredientName, findSubstitution, pantryPresence, usesPresenceOnly as familyUsesPresenceOnly, type IngredientSubstitution } from "./ingredient-families.js";
 
 const householdParams = z.object({ householdId: z.string().uuid() }).strict();
 const weekQuery = z.object({ weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict();
@@ -60,17 +61,17 @@ function usesPresenceOnly(name: string) {
 }
 
 type Ingredient = { name: string; quantity: Prisma.Decimal; unit: string };
-type PantryItemValue = { id?: string; name: string; normalizedName: string; quantity: Prisma.Decimal; unit: string; expirationDate?: Date | null };
+type PantryItemValue = { id?: string; name: string; normalizedName: string; quantity: Prisma.Decimal; unit: string; category?: string | null; expirationDate?: Date | null };
 type RecipeValue = { id: string; name: string; favorite: boolean; ingredients: Ingredient[] };
 type PantryQuantity = { quantity: Prisma.Decimal; unit: string };
 
 export type RecommendationIngredient = { name: string; requiredQuantity: number; availableQuantity: number; unit: string };
-export type RecipeRecommendation = { recipeId: string; recipeName: string; score: number; availableIngredients: number; totalIngredients: number; missingIngredients: RecommendationIngredient[] };
+export type RecipeRecommendation = { recipeId: string; recipeName: string; score: number; availableIngredients: number; totalIngredients: number; missingIngredients: RecommendationIngredient[]; substitutions: IngredientSubstitution[] };
 
 function pantryLookup(pantryItems: PantryItemValue[]) {
  const pantry = new Map<string, PantryQuantity>();
  for (const item of pantryItems) {
- const key = `${normalize(item.normalizedName || item.name)}|${normalize(item.unit)}`;
+ const key = `${canonicalIngredientName(item.normalizedName || item.name)}|${normalize(item.unit)}`;
  const current = pantry.get(key)?.quantity ?? new Prisma.Decimal(0);
  pantry.set(key, { quantity: current.plus(item.quantity), unit: item.unit });
  }
@@ -82,12 +83,13 @@ export function calculateRecommendations(recipes: RecipeValue[], pantryItems: Pa
  return recipes.map(recipe => {
  let availableIngredients = 0;
  const missingIngredients: RecommendationIngredient[] = [];
+ const substitutions: IngredientSubstitution[] = [];
  for (const ingredient of recipe.ingredients) {
- const key = `${normalize(ingredient.name)}|${normalize(ingredient.unit)}`;
+ const key = `${canonicalIngredientName(ingredient.name)}|${normalize(ingredient.unit)}`;
  const available = pantry.get(key)?.quantity ?? new Prisma.Decimal(0);
  const required = new Prisma.Decimal(ingredient.quantity);
  if (
-  usesPresenceOnly(ingredient.name)
+  familyUsesPresenceOnly(ingredient.name)
 ) {
   if (available.greaterThan(0)) {
     availableIngredients += 1;
@@ -98,11 +100,15 @@ else if (
 ) {
   availableIngredients += 1;
 }
- else missingIngredients.push({ name: ingredient.name, requiredQuantity: required.toDecimalPlaces(3).toNumber(), availableQuantity: available.toDecimalPlaces(3).toNumber(), unit: ingredient.unit });
+ else {
+  const substitution = findSubstitution(ingredient.name, pantryItems);
+  if (substitution) substitutions.push(substitution);
+  missingIngredients.push({ name: ingredient.name, requiredQuantity: required.toDecimalPlaces(3).toNumber(), availableQuantity: available.toDecimalPlaces(3).toNumber(), unit: ingredient.unit });
+ }
  }
  const totalIngredients = recipe.ingredients.length;
  const score = totalIngredients === 0 ? 0 : Math.round((availableIngredients / totalIngredients) * 100);
- return { recipeId: recipe.id, recipeName: recipe.name, score, availableIngredients, totalIngredients, missingIngredients, favorite: recipe.favorite };
+ return { recipeId: recipe.id, recipeName: recipe.name, score, availableIngredients, totalIngredients, missingIngredients, substitutions, favorite: recipe.favorite };
  }).sort((left, right) => right.score - left.score || Number(right.favorite) - Number(left.favorite) || left.recipeName.localeCompare(right.recipeName)).map(({ favorite: _favorite, ...value }) => value);
 }
 
@@ -133,7 +139,7 @@ export function calculateReadiness(meals: Array<{ id: string; recipe: RecipeValu
  if (!meal.recipe) { mealsMissingIngredients.push({ mealId: meal.id, recipeName: null, missingIngredients: ["Recipe unavailable"] }); continue; }
  const missing: string[] = [];
  for (const ingredient of meal.recipe.ingredients) {
- const key = `${normalize(ingredient.name)}|${normalize(ingredient.unit)}`;
+ const key = `${canonicalIngredientName(ingredient.name)}|${normalize(ingredient.unit)}`; // v4.9.0.8.1 ingredient families
  if (
   usesPresenceOnly(ingredient.name)
 ) {
@@ -154,7 +160,7 @@ else if (
  if (missing.length === 0) {
  cookableMeals += 1;
  for (const ingredient of meal.recipe.ingredients) {
- const key = `${normalize(ingredient.name)}|${normalize(ingredient.unit)}`;
+ const key = `${canonicalIngredientName(ingredient.name)}|${normalize(ingredient.unit)}`;
  remaining.set(key, (remaining.get(key) ?? new Prisma.Decimal(0)).minus(ingredient.quantity));
  }
  } else mealsMissingIngredients.push({ mealId: meal.id, recipeName: meal.recipe.name, missingIngredients: missing });

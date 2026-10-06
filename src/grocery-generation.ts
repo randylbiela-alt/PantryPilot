@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "./db.js";
 import { requireHousehold } from "./authorize.js";
+import { canonicalIngredientName, pantryPresence, usesPresenceOnly } from "./ingredient-families.js";
 
 const params = z.object({ householdId: z.string().uuid() }).strict();
 const body = z.object({ weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict();
@@ -70,7 +71,7 @@ export async function groceryGenerationRoutes(app: FastifyInstance): Promise<voi
  const required = new Map<string, RequiredIngredient>();
  for (const meal of plan?.meals ?? []) {
  for (const ingredient of meal.recipe?.ingredients ?? []) {
- const normalizedName = normalize(ingredient.name);
+ const normalizedName = canonicalIngredientName(ingredient.name);
  const unit = normalize(ingredient.unit);
  const key = `${normalizedName}|${unit}`;
  const multiplier = new Prisma.Decimal(meal.servings).div(meal.recipe!.servings);
@@ -84,7 +85,7 @@ export async function groceryGenerationRoutes(app: FastifyInstance): Promise<voi
 
  const pantry = new Map<string, Prisma.Decimal>();
  for (const item of pantryItems) {
- const key = `${normalize(item.normalizedName || item.name)}|${normalize(item.unit)}`;
+ const key = `${canonicalIngredientName(item.normalizedName || item.name)}|${normalize(item.unit)}`;
  pantry.set(key, (pantry.get(key) ?? new Prisma.Decimal(0)).plus(item.quantity));
  }
 
@@ -106,6 +107,7 @@ export async function groceryGenerationRoutes(app: FastifyInstance): Promise<voi
  let existingSkipped = 0;
 
  for (const [key, ingredient] of required) {
+ if (usesPresenceOnly(ingredient.name) && pantryPresence(pantryItems, ingredient.name)) continue;
  const shortage = ingredient.quantity.minus(pantry.get(key) ?? new Prisma.Decimal(0));
  if (!shortage.greaterThan(0)) continue;
  if (existing.has(ingredient.normalizedName)) {
