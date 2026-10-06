@@ -32,11 +32,14 @@ export async function forecastingRoutes(app: FastifyInstance): Promise<void> {
  await requireHousehold(request, householdId);
  const weekStartDate = week ? dateOnly(week) : mondayUtc();
 
- const [pantry, recipes, plan, groceryList] = await Promise.all([
+ const historyStart = new Date(todayUtc());
+ historyStart.setUTCDate(historyStart.getUTCDate() - 89);
+ const [pantry, recipes, plan, groceryList, consumptionEvents] = await Promise.all([
  db.pantryItem.findMany({ where: { householdId, archivedAt: null }, orderBy: { name: "asc" } }),
  db.recipe.findMany({ where: { householdId }, include: { ingredients: true }, orderBy: [{ favorite: "desc" }, { name: "asc" }] }),
  db.mealPlan.findUnique({ where: { householdId_weekStartDate: { householdId, weekStartDate } }, include: { meals: { include: { recipe: { include: { ingredients: true } } }, orderBy: [{ mealDate: "asc" }, { mealType: "asc" }] } } }),
- db.groceryList.findFirst({ where: { householdId, status: "ACTIVE" }, include: { items: true }, orderBy: { updatedAt: "desc" } })
+ db.groceryList.findFirst({ where: { householdId, status: "ACTIVE" }, include: { items: true }, orderBy: { updatedAt: "desc" } }),
+ db.inventoryEvent.findMany({ where: { householdId, type: "CONSUMED", occurredAt: { gte: historyStart } }, orderBy: { occurredAt: "asc" } })
  ]);
 
  const expiring3 = calculateExpiring(pantry, 3);
@@ -71,6 +74,12 @@ export async function forecastingRoutes(app: FastifyInstance): Promise<void> {
  categoryRisks.set(category, current);
  }
 
+ const usage = new Map<string,{total:number;events:number;first:Date}>();
+ for(const event of consumptionEvents){const amount=Math.abs(Number(event.quantityDelta));const current=usage.get(event.pantryItemId)??{total:0,events:0,first:event.occurredAt};current.total+=amount;current.events+=1;if(event.occurredAt<current.first)current.first=event.occurredAt;usage.set(event.pantryItemId,current);}
+ const projectedDepletion=pantry.flatMap(item=>{const history=usage.get(item.id);if(!history||history.total<=0)return [];const observedDays=Math.max(1,Math.ceil((todayUtc().getTime()-startOfUtcDay(history.first).getTime())/86400000)+1);const averageDailyConsumption=history.total/observedDays;const currentQuantity=Number(item.quantity);const estimatedDaysRemaining=Math.ceil(currentQuantity/averageDailyConsumption);return [{pantryItemId:item.id,name:item.name,unit:item.unit,currentQuantity,averageDailyConsumption:Number(averageDailyConsumption.toFixed(3)),estimatedDaysRemaining,depletionRisk:estimatedDaysRemaining<=7?"HIGH" as const:estimatedDaysRemaining<=14?"MEDIUM" as const:"LOW" as const,projected7DayDemand:Number((averageDailyConsumption*7).toFixed(3)),projected14DayDemand:Number((averageDailyConsumption*14).toFixed(3)),eventCount:history.events,observedDays}];}).sort((a,b)=>a.estimatedDaysRemaining-b.estimatedDaysRemaining||a.name.localeCompare(b.name));
+ const earliestDepletionDays=projectedDepletion[0]?.estimatedDaysRemaining??null;
+ const recommendedShoppingDate=earliestDepletionDays===null?null:(()=>{const date=todayUtc();date.setUTCDate(date.getUTCDate()+Math.max(0,earliestDepletionDays-2));return dayText(date);})();
+ const predictiveConfidenceScore=Math.min(100,Math.round((Math.min(consumptionEvents.length,30)/30)*55+(Math.min(projectedDepletion.length,10)/10)*30+(consumptionEvents.length?15:0)));
  const response = {
  generatedAt: new Date().toISOString(),
  horizon: { weekStartDate: dayText(weekStartDate), maximumDays: 30 },
@@ -108,9 +117,12 @@ export async function forecastingRoutes(app: FastifyInstance): Promise<void> {
  averageRecipeMatch: recommendations.length ? Math.round(recommendations.reduce((sum, recipe) => sum + recipe.score, 0) / recommendations.length) : 0,
  categoryRisks: [...categoryRisks.entries()].map(([category, value]) => ({ category, ...value })).sort((a, b) => (b.lowStock + b.expiring30) - (a.lowStock + a.expiring30) || a.category.localeCompare(b.category)).slice(0, 8)
  },
+ predictiveConsumption:{historyDays:90,eventCount:consumptionEvents.length,forecastConfidence:{level:confidence(predictiveConfidenceScore),score:predictiveConfidenceScore},recommendedShoppingDate,earliestDepletionDays,buySoon:projectedDepletion.filter(item=>item.estimatedDaysRemaining<=7).slice(0,10),projectedDepletion:projectedDepletion.slice(0,20),demand7Days:projectedDepletion.slice(0,10).map(item=>({pantryItemId:item.pantryItemId,name:item.name,unit:item.unit,projectedQuantity:item.projected7DayDemand})),demand14Days:projectedDepletion.slice(0,10).map(item=>({pantryItemId:item.pantryItemId,name:item.name,unit:item.unit,projectedQuantity:item.projected14DayDemand}))},
  limitations: [
  "Forecasts use current inventory, expiration dates, recipes, meal plans, and grocery state.",
- "Consumption velocity, depletion dates, waste rates, and cost forecasts are unavailable because transaction, disposal, and cost history are not recorded."
+ "Predictive consumption uses recorded CONSUMED inventory events from the previous 90 days.",
+ "Forecasts do not convert between units and become more reliable as additional consumption events are recorded.",
+ "Cost forecasts remain unavailable because item cost history is not recorded."
  ]
  };
 
