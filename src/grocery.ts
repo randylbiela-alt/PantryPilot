@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { db } from "./db.js";
 import {
  createGroceryItem,
@@ -13,6 +14,54 @@ import {
 import { requireHousehold } from "./authorize.js";
 import { errors } from "./errors.js";
 import { normalizeName } from "./security.js";
+
+
+const smartListParams = z.object({ listId: z.string().uuid() }).strict();
+type SmartPriority = "SHOP_NOW" | "SHOP_SOON" | "MONITOR";
+type SmartRecommendation = {
+ pantryItemId: string;
+ name: string;
+ unit: string;
+ suggestedQuantity: number;
+ daysRemaining: number;
+ priority: SmartPriority;
+ reason: string;
+};
+async function smartRecommendations(listId: string, request: Parameters<FastifyInstance["get"]>[1] extends never ? never : any): Promise<{ householdId: string; recommendations: SmartRecommendation[] }> {
+ const list = await db.groceryList.findUnique({ where: { id: listId }, select: { householdId: true, items: { where: { checked: false }, select: { normalizedName: true } } } });
+ if (!list) throw errors.notFound();
+ await requireHousehold(request, list.householdId);
+ const historyStart = new Date();
+ historyStart.setUTCDate(historyStart.getUTCDate() - 89);
+ const [pantry, events] = await Promise.all([
+  db.pantryItem.findMany({ where: { householdId: list.householdId, archivedAt: null }, select: { id: true, name: true, normalizedName: true, quantity: true, unit: true } }),
+  db.inventoryEvent.findMany({ where: { householdId: list.householdId, type: "CONSUMED", occurredAt: { gte: historyStart } }, orderBy: { occurredAt: "asc" } })
+ ]);
+ const existing = new Set(list.items.map(item => item.normalizedName));
+ const usage = new Map<string, { total: number; first: Date }>();
+ for (const event of events) {
+  const current = usage.get(event.pantryItemId) ?? { total: 0, first: event.occurredAt };
+  current.total += Math.abs(Number(event.quantityDelta));
+  if (event.occurredAt < current.first) current.first = event.occurredAt;
+  usage.set(event.pantryItemId, current);
+ }
+ const now = Date.now();
+ const recommendations = pantry.flatMap(item => {
+  const history = usage.get(item.id);
+  const normalizedName = normalizeName(item.normalizedName || item.name);
+  if (!history || history.total <= 0 || existing.has(normalizedName)) return [];
+  const observedDays = Math.max(1, Math.ceil((now - history.first.getTime()) / 86400000) + 1);
+  const averageDaily = history.total / observedDays;
+  const currentQuantity = Number(item.quantity);
+  const daysRemaining = Math.ceil(currentQuantity / averageDaily);
+  if (daysRemaining > 14) return [];
+  const priority: SmartPriority = daysRemaining <= 3 ? "SHOP_NOW" : daysRemaining <= 7 ? "SHOP_SOON" : "MONITOR";
+  const projectedNeed = Math.max(0, averageDaily * 14 - currentQuantity);
+  const suggestedQuantity = Number(Math.max(projectedNeed, averageDaily * 7).toFixed(3));
+  return [{ pantryItemId: item.id, name: item.name, unit: item.unit, suggestedQuantity, daysRemaining, priority, reason: `Projected to run out in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}` }];
+ }).sort((left, right) => left.daysRemaining - right.daysRemaining || left.name.localeCompare(right.name));
+ return { householdId: list.householdId, recommendations };
+}
 
 const itemSelect = {
  id: true,
@@ -239,4 +288,33 @@ export async function groceryRoutes(app: FastifyInstance): Promise<void> {
 
  return reply.code(204).send();
  });
+ app.get("/api/v1/grocery-lists/:listId/smart-shopping", async request => {
+  const { listId } = smartListParams.parse(request.params);
+  const result = await smartRecommendations(listId, request);
+  return { generatedAt: new Date().toISOString(), recommendations: result.recommendations };
+ });
+ app.post("/api/v1/grocery-lists/:listId/smart-shopping/apply", async request => {
+  const { listId } = smartListParams.parse(request.params);
+  const input = z.object({ pantryItemIds: z.array(z.string().uuid()).min(1).max(50) }).strict().parse(request.body);
+  const result = await smartRecommendations(listId, request);
+  await requireHousehold(request, result.householdId, true);
+  const selected = result.recommendations.filter(item => input.pantryItemIds.includes(item.pantryItemId));
+  return db.$transaction(async transaction => {
+   const list = await transaction.groceryList.findFirst({ where: { id: listId, householdId: result.householdId, status: "ACTIVE" }, include: { items: true } });
+   if (!list) throw errors.notFound();
+   const existing = new Set(list.items.filter(item => !item.checked).map(item => item.normalizedName));
+   let created = 0;
+   let existingSkipped = 0;
+   for (const item of selected) {
+    const normalizedName = normalizeName(item.name);
+    if (existing.has(normalizedName)) { existingSkipped += 1; continue; }
+    await transaction.groceryListItem.create({ data: { groceryListId: listId, name: `${item.name} (${item.suggestedQuantity} ${item.unit})`, normalizedName, checked: false } });
+    existing.add(normalizedName);
+    created += 1;
+   }
+   await writeAuditAndOutbox(transaction, { actorUserId: request.authUser!.id, householdId: result.householdId, action: "grocery.smart_planner_applied", resourceType: "GroceryList", resourceId: listId, messageType: "grocery.smart_planner.applied", correlationId: request.correlationId, metadata: { created, existingSkipped }, payload: { householdId: result.householdId, listId, created, existingSkipped } });
+   return { created, existingSkipped };
+  });
+ });
+
 }
