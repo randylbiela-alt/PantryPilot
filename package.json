@@ -19,7 +19,9 @@
     "postinstall": "prisma generate",
     "generate": "prisma generate",
     "build:full": "prisma generate && tsc -p tsconfig.build.json",
-    "sessions:cleanup": "tsx src/cleanup-sessions.ts"
+    "sessions:cleanup": "tsx src/cleanup-sessions.ts",
+    "sanitize:ascii": "node tools/sanitize-ascii.mjs src",
+    "validate:ascii": "node tools/validate-ascii.mjs src"
   },
   "dependencies": {
     "@azure/msal-node": "^3.7.3",

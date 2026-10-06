@@ -1,0 +1,362 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String             @id @default(uuid()) @db.Uuid
+  displayName     String?
+  primaryEmail    String?
+  status          UserStatus         @default(ACTIVE)
+  createdAt       DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(6)
+  lastLoginAt     DateTime?          @db.Timestamptz(6)
+  identities      ExternalIdentity[]
+  invitesAccepted HouseholdInvite[]  @relation("InviteAcceptor")
+  invitesSent     HouseholdInvite[]  @relation("InviteCreator")
+  memberships     HouseholdMember[]
+  profile         UserProfile?
+  sessions        UserSession[]
+}
+
+model ExternalIdentity {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  provider        IdentityProvider
+  issuer          String
+  providerSubject String
+  emailAtProvider String?
+  emailVerified   Boolean          @default(false)
+  linkedAt        DateTime         @default(now()) @db.Timestamptz(6)
+  lastUsedAt      DateTime?        @db.Timestamptz(6)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([issuer, providerSubject])
+  @@index([userId])
+}
+
+model UserSession {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid
+  tokenHash         String    @unique
+  expiresAt         DateTime  @db.Timestamptz(6)
+  revokedAt         DateTime? @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  absoluteExpiresAt DateTime  @db.Timestamptz(6)
+  lastSeenAt        DateTime  @default(now()) @db.Timestamptz(6)
+  rotatedAt         DateTime  @default(now()) @db.Timestamptz(6)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, absoluteExpiresAt, revokedAt])
+}
+
+model UserProfile {
+  userId               String   @id @db.Uuid
+  householdSizeDefault Int      @default(1)
+  weeklyBudget         Decimal? @db.Decimal(10, 2)
+  defaultDiet          String   @default("No restrictions")
+  onboardingComplete   Boolean  @default(false)
+  locale               String   @default("en-US")
+  timeZone             String   @default("America/Indiana/Indianapolis")
+  version              Int      @default(1)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Household {
+  id              String            @id @default(uuid()) @db.Uuid
+  name            String
+  timeZone        String            @default("America/Indiana/Indianapolis")
+  createdByUserId String            @db.Uuid
+  version         Int               @default(1)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(6)
+  groceryLists    GroceryList[]
+  invites         HouseholdInvite[]
+  members         HouseholdMember[]
+  mealPlans       MealPlan[]
+  pantryItems     PantryItem[]
+  recipes         Recipe[]
+}
+
+model HouseholdMember {
+  householdId String           @db.Uuid
+  userId      String           @db.Uuid
+  role        HouseholdRole
+  status      MembershipStatus @default(ACTIVE)
+  household   Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([householdId, userId])
+  @@index([userId, status])
+}
+
+model PantryItem {
+  id              String    @id @default(uuid()) @db.Uuid
+  householdId     String    @db.Uuid
+  name            String
+  normalizedName  String
+  quantity        Decimal   @db.Decimal(12, 3)
+  unit            String
+  category        String?
+  expirationDate  DateTime? @db.Date
+  version         Int       @default(1)
+  createdByUserId String    @db.Uuid
+  updatedByUserId String    @db.Uuid
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  archivedAt      DateTime? @db.Timestamptz(6)
+  household       Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, normalizedName])
+  @@index([householdId, expirationDate])
+}
+
+model GroceryList {
+  id              String            @id @default(uuid()) @db.Uuid
+  householdId     String            @db.Uuid
+  name            String
+  status          GroceryListStatus @default(ACTIVE)
+  version         Int               @default(1)
+  createdByUserId String            @db.Uuid
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(6)
+  household       Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  items           GroceryListItem[]
+
+  @@index([householdId, status])
+}
+
+model GroceryListItem {
+  id             String      @id @default(uuid()) @db.Uuid
+  groceryListId  String      @db.Uuid
+  name           String
+  normalizedName String
+  checked        Boolean     @default(false)
+  version        Int         @default(1)
+  groceryList    GroceryList @relation(fields: [groceryListId], references: [id], onDelete: Cascade)
+}
+
+model MealPlan {
+  id            String         @id @default(uuid()) @db.Uuid
+  householdId   String         @db.Uuid
+  weekStartDate DateTime       @db.Date
+  status        MealPlanStatus @default(DRAFT)
+  generatedBy   String
+  version       Int            @default(1)
+  household     Household      @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  meals         PlannedMeal[]
+
+  @@unique([householdId, weekStartDate])
+}
+
+model PlannedMeal {
+  id                 String   @id @default(uuid()) @db.Uuid
+  mealPlanId         String   @db.Uuid
+  mealDate           DateTime @db.Date
+  displayName        String
+  preparationMinutes Int      @default(0)
+  budgetFriendly     Boolean  @default(true)
+  servings           Int
+  mealType           MealType @default(DINNER)
+  notes              String?
+  version            Int      @default(1)
+  recipeId           String?  @db.Uuid
+  mealPlan           MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  recipe             Recipe?  @relation(fields: [recipeId], references: [id])
+
+  @@unique([mealPlanId, mealDate, mealType])
+  @@index([mealPlanId, mealDate])
+  @@index([recipeId])
+}
+
+model Recipe {
+  id           String             @id @default(uuid()) @db.Uuid
+  householdId  String             @db.Uuid
+  name         String
+  description  String?
+  servings     Int                @default(4)
+  prepMinutes  Int                @default(0)
+  cookMinutes  Int                @default(0)
+  favorite     Boolean            @default(false)
+  tags         String[]           @default([])
+  version      Int                @default(1)
+  createdAt    DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @db.Timestamptz(6)
+  plannedMeals PlannedMeal[]
+  household    Household          @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  ingredients  RecipeIngredient[]
+
+  @@index([householdId, name])
+  @@index([householdId, favorite])
+}
+
+model RecipeIngredient {
+  id        String  @id @default(uuid()) @db.Uuid
+  recipeId  String  @db.Uuid
+  name      String
+  quantity  Decimal @db.Decimal(12, 3)
+  unit      String
+  sortOrder Int     @default(0)
+  recipe    Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId, sortOrder])
+}
+
+model AuditEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  occurredAt    DateTime @default(now()) @db.Timestamptz(6)
+  actorUserId   String?  @db.Uuid
+  householdId   String?  @db.Uuid
+  action        String
+  resourceType  String
+  resourceId    String?
+  result        String
+  correlationId String
+  metadata      Json
+
+  @@index([householdId, occurredAt])
+}
+
+model OutboxMessage {
+  id            String    @id @default(uuid()) @db.Uuid
+  topic         String
+  messageType   String
+  aggregateType String
+  aggregateId   String    @db.Uuid
+  payload       Json
+  correlationId String
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  publishedAt   DateTime? @db.Timestamptz(6)
+
+  @@index([publishedAt, createdAt])
+}
+
+model InventoryEvent {
+  id             String             @id @default(uuid()) @db.Uuid
+  householdId    String             @db.Uuid
+  pantryItemId   String             @db.Uuid
+  pantryItemName String
+  type           InventoryEventType
+  quantityBefore Decimal            @db.Decimal(12, 3)
+  quantityAfter  Decimal            @db.Decimal(12, 3)
+  quantityDelta  Decimal            @db.Decimal(12, 3)
+  unit           String
+  reason         String?
+  actorUserId    String             @db.Uuid
+  correlationId  String
+  occurredAt     DateTime           @default(now()) @db.Timestamptz(6)
+
+  @@index([householdId, occurredAt])
+  @@index([pantryItemId, occurredAt])
+  @@index([householdId, type, occurredAt])
+}
+
+model AuthFlow {
+  id              String           @id @default(uuid()) @db.Uuid
+  provider        IdentityProvider
+  stateHash       String           @unique
+  nonce           String
+  pkceVerifier    String
+  inviteTokenHash String?
+  returnUrl       String
+  expiresAt       DateTime         @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(6)
+
+  @@index([provider, expiresAt])
+  @@index([expiresAt])
+}
+
+model HouseholdInvite {
+  id               String        @id @default(uuid()) @db.Uuid
+  householdId      String        @db.Uuid
+  email            String
+  normalizedEmail  String
+  role             HouseholdRole @default(MEMBER)
+  status           InviteStatus  @default(PENDING)
+  tokenHash        String        @unique
+  invitedByUserId  String        @db.Uuid
+  acceptedByUserId String?       @db.Uuid
+  expiresAt        DateTime      @db.Timestamptz(6)
+  acceptedAt       DateTime?     @db.Timestamptz(6)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(6)
+  acceptedByUser   User?         @relation("InviteAcceptor", fields: [acceptedByUserId], references: [id])
+  household        Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  invitedByUser    User          @relation("InviteCreator", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, status, expiresAt])
+  @@index([normalizedEmail, status])
+  @@index([invitedByUserId])
+  @@index([acceptedByUserId])
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETION_PENDING
+  DELETED
+}
+
+enum IdentityProvider {
+  ENTRA
+  MICROSOFT
+  GOOGLE
+  APPLE
+  EMAIL_OTP
+  DEV
+}
+
+enum HouseholdRole {
+  OWNER
+  ADMIN
+  ADULT
+  MEMBER
+  READ_ONLY
+}
+
+enum MembershipStatus {
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum GroceryListStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum MealPlanStatus {
+  DRAFT
+  GENERATING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+}
+
+enum InventoryEventType {
+  ADDED
+  ADJUSTED
+  CONSUMED
+  DISCARDED
+  EXPIRED
+  ARCHIVED
+}
