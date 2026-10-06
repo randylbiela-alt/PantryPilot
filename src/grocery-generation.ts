@@ -51,6 +51,7 @@ const shoppingName = (value: string) => {
 type RequiredIngredient = {
  name: string;
  normalizedName: string;
+ pantryKey: string;
  unit: string;
  quantity: Prisma.Decimal;
 };
@@ -109,15 +110,18 @@ export async function groceryGenerationRoutes(app: FastifyInstance): Promise<voi
  const required = new Map<string, RequiredIngredient>();
  for (const meal of plan?.meals ?? []) {
  for (const ingredient of meal.recipe?.ingredients ?? []) {
- const normalizedName = canonicalIngredientName(ingredient.name);
+ const canonicalName = canonicalIngredientName(ingredient.name);
+ const displayName = shoppingName(ingredient.name);
+ const shoppingNormalizedName = normalize(displayName);
  const unit = normalize(ingredient.unit);
- const key = `${normalizedName}|${unit}`;
+ const pantryKey = `${canonicalName}|${unit}`;
+ const aggregationKey = `${shoppingNormalizedName}|${unit}`;
  const multiplier = new Prisma.Decimal(meal.servings).div(meal.recipe!.servings);
  const quantity = new Prisma.Decimal(ingredient.quantity).mul(multiplier);
- const current = required.get(key);
- required.set(key, current
+ const current = required.get(aggregationKey);
+ required.set(aggregationKey, current
  ? { ...current, quantity: current.quantity.plus(quantity) }
- : { name: shoppingName(ingredient.name), normalizedName: normalize(shoppingName(ingredient.name)), unit: ingredient.unit, quantity });
+ : { name: displayName, normalizedName: shoppingNormalizedName, pantryKey, unit: ingredient.unit, quantity });
  }
  }
 
@@ -144,9 +148,9 @@ export async function groceryGenerationRoutes(app: FastifyInstance): Promise<voi
  const items: Array<{ id: string; name: string; quantity: number; unit: string }> = [];
  let existingSkipped = 0;
 
- for (const [key, ingredient] of required) {
+ for (const ingredient of required.values()) {
  if (usesPresenceOnly(ingredient.name) && pantryPresence(pantryItems, ingredient.name)) continue;
- const shortage = ingredient.quantity.minus(pantry.get(key) ?? new Prisma.Decimal(0));
+ const shortage = ingredient.quantity.minus(pantry.get(ingredient.pantryKey) ?? new Prisma.Decimal(0));
  if (!shortage.greaterThan(0)) continue;
  if (existing.has(ingredient.normalizedName)) {
  existingSkipped += 1;
