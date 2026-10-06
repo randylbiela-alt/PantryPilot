@@ -14,29 +14,54 @@ type PantryValue = {
   category?: string | null;
 };
 
-const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
-const descriptiveSuffix = (value: string) => normalize(value)
-  .replace(/\([^)]*\)/g, " ")
-  .replace(/\[[^\]]*\]/g, " ")
-  .split(",")[0]!
+const normalize = (value: string) => value
+  .normalize("NFKC")
+  .toLowerCase()
+  .replace(/[‐‑‒–—]/g, "-")
+  .replace(/[’‘]/g, "'")
   .replace(/\s+/g, " ")
   .trim();
 
+const leadingPreparation = /^(?:finely|roughly|coarsely|thinly|thickly|freshly)\s+(?:chopped|diced|minced|sliced|grated|shredded|crushed|ground|torn)\s+/;
+const trailingPreparation = /\s+(?:finely|roughly|coarsely|thinly|thickly|freshly)?\s*(?:chopped|diced|minced|sliced|grated|shredded|crushed|ground|torn|julienned|peeled|seeded|cored|trimmed|softened|melted|drained|rinsed|divided|beaten|whisked|cubed|halved|quartered)$/;
+const trailingRecipeNote = /\s+(?:to taste|as needed|for serving|for garnish|plus more|optional)$/;
+
+export function cleanIngredientName(value: string) {
+  let cleaned = normalize(value)
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .split(/[;,]/)[0]!
+    .replace(/\s+/g, " ")
+    .trim();
+
+  let previous = "";
+  while (cleaned !== previous) {
+    previous = cleaned;
+    cleaned = cleaned
+      .replace(leadingPreparation, "")
+      .replace(trailingPreparation, "")
+      .replace(trailingRecipeNote, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return cleaned;
+}
+
 const canonicalNames = new Map<string, string>([
-  ["sweet paprika", "paprika"],
-  ["smoked paprika", "paprika"],
-  ["hungarian paprika", "paprika"],
-  ["fresh thyme", "thyme"],
-  ["dried thyme", "thyme"],
-  ["kosher salt", "salt"],
-  ["sea salt", "salt"],
-  ["table salt", "salt"],
-  ["ground black pepper", "black pepper"],
-  ["freshly ground black pepper", "black pepper"],
-  ["garlic cloves", "garlic"],
-  ["fresh garlic", "garlic"],
-  ["yellow onion", "onion"],
-  ["white onion", "onion"]
+  ["sweet paprika", "paprika"], ["smoked paprika", "paprika"], ["hungarian paprika", "paprika"],
+  ["fresh thyme", "thyme"], ["dried thyme", "thyme"],
+  ["kosher salt", "salt"], ["sea salt", "salt"], ["table salt", "salt"],
+  ["ground black pepper", "black pepper"], ["freshly ground black pepper", "black pepper"],
+  ["garlic clove", "garlic"], ["garlic cloves", "garlic"], ["fresh garlic", "garlic"], ["whole garlic", "garlic"],
+  ["yellow onion", "onion"], ["white onion", "onion"], ["onions", "onion"],
+  ["green onion", "green onions"], ["scallion", "green onions"], ["scallions", "green onions"], ["spring onion", "green onions"], ["spring onions", "green onions"],
+  ["bell peppers", "bell pepper"], ["carrots", "carrot"], ["celery stalk", "celery"], ["celery stalks", "celery"],
+  ["tomatoes", "tomato"], ["potatoes", "potato"], ["mushrooms", "mushroom"],
+  ["eggs", "egg"], ["lemons", "lemon"], ["limes", "lime"],
+  ["bay leaf", "bay leaves"], ["chilli powder", "chili powder"], ["cayenne", "cayenne pepper"],
+  ["all-purpose flour", "all purpose flour"], ["plain flour", "all purpose flour"],
+  ["confectioners sugar", "powdered sugar"], ["confectioner's sugar", "powdered sugar"], ["icing sugar", "powdered sugar"],
+  ["caster sugar", "granulated sugar"], ["bread crumb", "breadcrumbs"], ["bread crumbs", "breadcrumbs"]
 ]);
 
 const presenceOnlyNames = new Set([
@@ -44,9 +69,9 @@ const presenceOnlyNames = new Set([
   "cinnamon", "cloves", "coriander", "cumin", "curry powder", "dill", "garlic powder",
   "ginger", "italian seasoning", "nutmeg", "onion powder", "oregano", "paprika", "parsley",
   "red pepper flakes", "rosemary", "sage", "seasoning salt", "thyme", "turmeric",
-  "all purpose flour", "baking powder", "baking soda", "bread crumbs", "breadcrumbs",
-  "brown sugar", "cornmeal", "cornstarch", "flour", "granulated sugar", "oats",
-  "olive oil", "powdered sugar", "rolled oats", "salt", "sugar", "vegetable oil", "yeast"
+  "all purpose flour", "baking powder", "baking soda", "breadcrumbs", "brown sugar", "cornmeal",
+  "cornstarch", "flour", "granulated sugar", "oats", "olive oil", "powdered sugar", "rolled oats",
+  "salt", "sugar", "vegetable oil", "yeast"
 ]);
 
 const families: Array<{ name: string; members: string[] }> = [
@@ -61,9 +86,8 @@ const families: Array<{ name: string; members: string[] }> = [
 ];
 
 export function canonicalIngredientName(value: string) {
-  const base = descriptiveSuffix(value)
-    .replace(" uncooked", "")
-    .replace(" raw", "")
+  const base = cleanIngredientName(value)
+    .replace(/\s+(?:uncooked|raw)$/g, "")
     .trim();
   return canonicalNames.get(base) ?? base;
 }
