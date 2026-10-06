@@ -9,6 +9,15 @@ const params = z.object({ householdId: z.string().uuid() }).strict();
 const query = z.object({ weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict();
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 const dateOnly = (value: string) => new Date(`${value}T00:00:00.000Z`);
+
+const startOfUtcDay = (date: Date) =>
+  new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate()
+    )
+  );
 const todayUtc = () => { const now = new Date(); return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())); };
 const mondayUtc = () => { const date = todayUtc(); const day = date.getUTCDay(); date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1)); return date; };
 const dayText = (value: Date) => value.toISOString().slice(0, 10);
