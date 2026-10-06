@@ -18,10 +18,26 @@ import { normalizeName } from "./security.js";
 
 const smartListParams = z.object({ listId: z.string().uuid() }).strict();
 type SmartPriority = "SHOP_NOW" | "SHOP_SOON" | "MONITOR";
+type StoreSection = "PRODUCE" | "BAKERY" | "MEAT" | "DAIRY" | "FROZEN" | "PANTRY" | "BEVERAGES" | "HOUSEHOLD" | "OTHER";
+const storeSectionOrder: StoreSection[] = ["PRODUCE", "BAKERY", "MEAT", "DAIRY", "FROZEN", "PANTRY", "BEVERAGES", "HOUSEHOLD", "OTHER"];
+function storeSection(name: string, category?: string | null): StoreSection {
+ const value = `${category ?? ""} ${name}`.toLowerCase();
+ if (/produce|fruit|vegetable|banana|apple|lettuce|onion|garlic|tomato|potato|lemon|lime/.test(value)) return "PRODUCE";
+ if (/bakery|bread|bun|roll|tortilla|bagel/.test(value)) return "BAKERY";
+ if (/meat|poultry|chicken|beef|pork|turkey|seafood|fish|shrimp/.test(value)) return "MEAT";
+ if (/dairy|milk|cheese|yogurt|butter|cream|egg/.test(value)) return "DAIRY";
+ if (/frozen|ice cream/.test(value)) return "FROZEN";
+ if (/beverage|drink|juice|soda|water|coffee|tea/.test(value)) return "BEVERAGES";
+ if (/household|clean|paper|soap|detergent|foil|bag/.test(value)) return "HOUSEHOLD";
+ if (/pantry|canned|pasta|rice|flour|sugar|oil|vinegar|sauce|spice|seasoning/.test(value)) return "PANTRY";
+ return "OTHER";
+}
 type SmartRecommendation = {
  pantryItemId: string;
  name: string;
  unit: string;
+ section: StoreSection;
+ routeOrder: number;
  suggestedQuantity: number;
  daysRemaining: number;
  priority: SmartPriority;
@@ -34,7 +50,7 @@ async function smartRecommendations(listId: string, request: Parameters<FastifyI
  const historyStart = new Date();
  historyStart.setUTCDate(historyStart.getUTCDate() - 89);
  const [pantry, events] = await Promise.all([
-  db.pantryItem.findMany({ where: { householdId: list.householdId, archivedAt: null }, select: { id: true, name: true, normalizedName: true, quantity: true, unit: true } }),
+  db.pantryItem.findMany({ where: { householdId: list.householdId, archivedAt: null }, select: { id: true, name: true, normalizedName: true, quantity: true, unit: true, category: true } }),
   db.inventoryEvent.findMany({ where: { householdId: list.householdId, type: "CONSUMED", occurredAt: { gte: historyStart } }, orderBy: { occurredAt: "asc" } })
  ]);
  const existing = new Set(list.items.map(item => item.normalizedName));
@@ -58,8 +74,9 @@ async function smartRecommendations(listId: string, request: Parameters<FastifyI
   const priority: SmartPriority = daysRemaining <= 3 ? "SHOP_NOW" : daysRemaining <= 7 ? "SHOP_SOON" : "MONITOR";
   const projectedNeed = Math.max(0, averageDaily * 14 - currentQuantity);
   const suggestedQuantity = Number(Math.max(projectedNeed, averageDaily * 7).toFixed(3));
-  return [{ pantryItemId: item.id, name: item.name, unit: item.unit, suggestedQuantity, daysRemaining, priority, reason: `Projected to run out in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}` }];
- }).sort((left, right) => left.daysRemaining - right.daysRemaining || left.name.localeCompare(right.name));
+  const section = storeSection(item.name, item.category);
+  return [{ pantryItemId: item.id, name: item.name, unit: item.unit, section, routeOrder: storeSectionOrder.indexOf(section), suggestedQuantity, daysRemaining, priority, reason: `Projected to run out in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}` }];
+ }).sort((left, right) => left.routeOrder - right.routeOrder || left.daysRemaining - right.daysRemaining || left.name.localeCompare(right.name));
  return { householdId: list.householdId, recommendations };
 }
 
@@ -291,7 +308,12 @@ export async function groceryRoutes(app: FastifyInstance): Promise<void> {
  app.get("/api/v1/grocery-lists/:listId/smart-shopping", async request => {
   const { listId } = smartListParams.parse(request.params);
   const result = await smartRecommendations(listId, request);
-  return { generatedAt: new Date().toISOString(), recommendations: result.recommendations };
+  const shopNow = result.recommendations.filter(item => item.priority === "SHOP_NOW").length;
+  const shopSoon = result.recommendations.filter(item => item.priority === "SHOP_SOON").length;
+  const readinessScore = Math.min(100, shopNow * 25 + shopSoon * 12 + Math.min(result.recommendations.length, 10) * 3);
+  const readinessLevel = readinessScore >= 70 ? "SHOP_NOW" : readinessScore >= 35 ? "SHOP_THIS_WEEK" : "MONITOR";
+  const sections = storeSectionOrder.map(section => ({ section, items: result.recommendations.filter(item => item.section === section) })).filter(group => group.items.length);
+  return { generatedAt: new Date().toISOString(), readiness: { score: readinessScore, level: readinessLevel, totalItems: result.recommendations.length, shopNow, shopSoon }, route: sections.map(group => group.section), sections, recommendations: result.recommendations };
  });
  app.post("/api/v1/grocery-lists/:listId/smart-shopping/apply", async request => {
   const { listId } = smartListParams.parse(request.params);
