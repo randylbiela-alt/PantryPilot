@@ -9,17 +9,43 @@ const params = z.object({ householdId: z.string().uuid() }).strict();
 const body = z.object({ weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict();
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 const weekDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
+const titleCase = (value: string) => value
+ .split(" ")
+ .filter(Boolean)
+ .map(word => word
+  .split("-")
+  .map(part => part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part)
+  .join("-"))
+ .join(" ");
+const shoppingAliases = new Map<string, string>([
+ ["celery rib", "celery"],
+ ["celery ribs", "celery"],
+ ["green capsicum", "bell pepper"],
+ ["green capsicum / bell pepper", "bell pepper"],
+ ["capsicum", "bell pepper"],
+ ["crushed canned tomato", "crushed tomatoes"],
+ ["canned crushed tomato", "crushed tomatoes"],
+ ["canned tomato", "canned tomatoes"],
+ ["long grain rice", "long grain rice"],
+ ["fresh thyme", "thyme"],
+ ["dried thyme", "thyme"]
+]);
 const shoppingName = (value: string) => {
- const canonical = canonicalIngredientName(value);
- const cleaned = canonical
-  .replace(/\([^)]*(?:optional|to taste|for serving|for garnish|divided)[^)]*\)/gi, " ")
-  .replace(/\b(?:preferably|optional|divided|for serving|for garnish|to taste)\b.*$/gi, " ")
-  .replace(/,\s*(?:roughly\s+|finely\s+|thinly\s+)?(?:chopped|diced|minced|sliced|peeled|crushed|grated|shredded|trimmed|rinsed|drained|seeded|halved|quartered|cubed|cut|softened|melted|cooked|uncooked|skinless|boneless)\b.*$/gi, " ")
-  .replace(/\b(?:skinless|boneless),?\s*/gi, " ")
+ let cleaned = canonicalIngredientName(value)
+  .replace(/\([^)]*\)/g, " ")
+  .replace(/\[[^\]]*\]/g, " ")
+  .replace(/\s*\/\s*/g, " / ")
+  .replace(/,\s*(?:preferably|ideally)\b[^,]*/gi, " ")
+  .replace(/,\s*(?:roughly\s+|finely\s+|thinly\s+|thickly\s+|freshly\s+)?(?:chopped|diced|minced|sliced|peeled|crushed|grated|shredded|trimmed|rinsed|drained|seeded|halved|quartered|cubed|cut|softened|melted|cooked|uncooked|torn)\b.*$/gi, " ")
+  .replace(/,\s*(?:skinless|boneless|medium|large|small)\b.*$/gi, " ")
+  .replace(/\b(?:skinless|boneless|uncooked|raw),?\s*/gi, " ")
   .replace(/\s+/g, " ")
-  .replace(/^\s+|\s+$/g, "")
+  .trim()
   .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "");
- return cleaned || canonical;
+ if (/\bor\b/i.test(cleaned)) cleaned = cleaned.split(/\s+or\s+/i)[0] ?? cleaned;
+ if (cleaned.includes(" / ")) cleaned = cleaned.split(" / ").at(-1) ?? cleaned;
+ cleaned = shoppingAliases.get(cleaned.toLowerCase()) ?? cleaned;
+ return titleCase(cleaned || canonicalIngredientName(value));
 };
 
 type RequiredIngredient = {
@@ -91,7 +117,7 @@ export async function groceryGenerationRoutes(app: FastifyInstance): Promise<voi
  const current = required.get(key);
  required.set(key, current
  ? { ...current, quantity: current.quantity.plus(quantity) }
- : { name: shoppingName(ingredient.name), normalizedName: shoppingName(ingredient.name), unit: ingredient.unit, quantity });
+ : { name: shoppingName(ingredient.name), normalizedName: normalize(shoppingName(ingredient.name)), unit: ingredient.unit, quantity });
  }
  }
 
