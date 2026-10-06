@@ -91,7 +91,7 @@ export function calculateRecommendations(recipes: RecipeValue[], pantryItems: Pa
  if (
   familyUsesPresenceOnly(ingredient.name)
 ) {
-  if (available.greaterThan(0)) {
+  if (pantryPresence(pantryItems, ingredient.name)) {
     availableIngredients += 1;
   }
 }
@@ -141,12 +141,9 @@ export function calculateReadiness(meals: Array<{ id: string; recipe: RecipeValu
  for (const ingredient of meal.recipe.ingredients) {
  const key = `${canonicalIngredientName(ingredient.name)}|${normalize(ingredient.unit)}`; // v4.9.0.8.1 ingredient families
  if (
-  usesPresenceOnly(ingredient.name)
+  familyUsesPresenceOnly(ingredient.name)
 ) {
-  if (
-    (remaining.get(key) ?? new Prisma.Decimal(0))
-      .lessThanOrEqualTo(0)
-  ) {
+  if (!pantryPresence(pantryItems, ingredient.name)) {
     missing.push(ingredient.name);
   }
 }

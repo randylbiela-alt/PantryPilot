@@ -15,7 +15,12 @@ type PantryValue = {
 };
 
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
-const descriptiveSuffix = (value: string) => normalize(value).split(",")[0]!.trim();
+const descriptiveSuffix = (value: string) => normalize(value)
+  .replace(/\([^)]*\)/g, " ")
+  .replace(/\[[^\]]*\]/g, " ")
+  .split(",")[0]!
+  .replace(/\s+/g, " ")
+  .trim();
 
 const canonicalNames = new Map<string, string>([
   ["sweet paprika", "paprika"],
@@ -35,7 +40,7 @@ const canonicalNames = new Map<string, string>([
 ]);
 
 const presenceOnlyNames = new Set([
-  "allspice", "basil", "bay leaves", "black pepper", "cayenne pepper", "chili powder",
+  "allspice", "basil", "bay leaves", "black pepper", "cayenne pepper", "cayenne powder", "chili powder",
   "cinnamon", "cloves", "coriander", "cumin", "curry powder", "dill", "garlic powder",
   "ginger", "italian seasoning", "nutmeg", "onion powder", "oregano", "paprika", "parsley",
   "red pepper flakes", "rosemary", "sage", "seasoning salt", "thyme", "turmeric",
