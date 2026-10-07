@@ -15,12 +15,21 @@ const callbackQuery = z.object({ code: z.string().min(1).optional(), state: z.st
 const inviteParams = z.object({ householdId: z.string().uuid() }).strict();
 const inviteInput = z.object({ email: z.string().email().max(320), role: z.enum(["ADMIN","ADULT","MEMBER","READ_ONLY"]).default("MEMBER"), expiresInDays: z.number().int().min(1).max(30).default(7) }).strict();
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
-const safeReturnUrl = (value: string | undefined, frontend: string) => {
+const safeReturnUrl = (
+ value: string | undefined,
+ frontend: string,
+ supportApp: string | undefined
+) => {
  if (!value) return frontend;
  try {
  const requested = new URL(value);
- const configured = new URL(frontend);
- const isConfiguredOrigin = requested.origin === configured.origin;
+ const configuredOrigins = [
+ frontend,
+ supportApp
+ ]
+ .filter((candidate): candidate is string => Boolean(candidate))
+ .map(candidate => new URL(candidate).origin);
+ const isConfiguredOrigin = configuredOrigins.includes(requested.origin);
  const isPantryPilotPreview =
  requested.protocol === "https:" &&
  requested.hostname.startsWith("pantry-pilot-") &&
@@ -106,15 +115,28 @@ async function provisionIdentity(appConfig: FastifyInstance["config"], input: { 
 
 export async function oauthRoutes(app: FastifyInstance): Promise<void> {
  const frontend = app.config.FRONTEND_APP_URL ?? app.config.CORS_ORIGIN;
+ const supportApp = app.config.SUPPORT_APP_URL;
  const configuredMicrosoftCallback = app.config.MICROSOFT_CALLBACK_URL;
  const configuredGoogleCallback = app.config.GOOGLE_CALLBACK_URL;
+ const isSupportReturnUrl = (returnUrl: string): boolean =>
+ supportApp
+ ? new URL(returnUrl).origin === new URL(supportApp).origin
+ : false;
+ const microsoftCallbackFor = (returnUrl: string): string =>
+ isSupportReturnUrl(returnUrl)
+ ? callbackFor("microsoft", returnUrl)
+ : configuredMicrosoftCallback ?? callbackFor("microsoft", returnUrl);
+ const googleCallbackFor = (returnUrl: string): string =>
+ isSupportReturnUrl(returnUrl)
+ ? callbackFor("google", returnUrl)
+ : configuredGoogleCallback ?? callbackFor("google", returnUrl);
  const crypto = new CryptoProvider();
  const microsoft = () => new ConfidentialClientApplication({ auth: { clientId: app.config.MICROSOFT_CLIENT_ID ?? "", clientSecret: app.config.MICROSOFT_CLIENT_SECRET ?? "", authority: app.config.MICROSOFT_AUTHORITY ?? "https://login.microsoftonline.com/common" } });
 
  app.get("/api/v1/auth/microsoft/start", async (request, reply) => {
  if (!app.config.MICROSOFT_CLIENT_ID || !app.config.MICROSOFT_CLIENT_SECRET) throw new AppError(503, "MICROSOFT_LOGIN_UNAVAILABLE", "Microsoft sign-in is not configured.");
  const query = startQuery.parse(request.query); const state = randomToken(); const nonce = randomToken(); const { verifier, challenge } = await crypto.generatePkceCodes();
- const returnUrl = safeReturnUrl(query.returnUrl, frontend);
+ const returnUrl = safeReturnUrl(query.returnUrl, frontend, supportApp);
  const microsoftCallback = configuredMicrosoftCallback ?? callbackFor("microsoft", returnUrl);
  await db.authFlow.create({ data: { provider: "MICROSOFT", stateHash: hashToken(state, app.config.SESSION_PEPPER), nonce, pkceVerifier: verifier, inviteTokenHash: query.invite ? hashToken(query.invite, app.config.SESSION_PEPPER) : null, returnUrl, expiresAt: new Date(Date.now() + 10 * 60 * 1000) } });
  const url = await microsoft().getAuthCodeUrl({ redirectUri: microsoftCallback, scopes: ["openid","profile","email"], state, nonce, codeChallenge: challenge, codeChallengeMethod: "S256", prompt: "select_account" });
@@ -136,7 +158,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
  app.get("/api/v1/auth/google/start", async (request, reply) => {
  if (!app.config.GOOGLE_CLIENT_ID || !app.config.GOOGLE_CLIENT_SECRET) throw new AppError(503, "GOOGLE_LOGIN_UNAVAILABLE", "Google sign-in is not configured.");
  const query = startQuery.parse(request.query); const state = randomToken(); const nonce = randomToken(); const verifier = randomToken(); const challenge = createHash("sha256").update(verifier).digest("base64url");
- const returnUrl = safeReturnUrl(query.returnUrl, frontend);
+ const returnUrl = safeReturnUrl(query.returnUrl, frontend, supportApp);
  const googleCallback = configuredGoogleCallback ?? callbackFor("google", returnUrl);
  await db.authFlow.create({ data: { provider: "GOOGLE", stateHash: hashToken(state, app.config.SESSION_PEPPER), nonce, pkceVerifier: verifier, inviteTokenHash: query.invite ? hashToken(query.invite, app.config.SESSION_PEPPER) : null, returnUrl, expiresAt: new Date(Date.now() + 10 * 60 * 1000) } });
  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth"); url.searchParams.set("client_id", app.config.GOOGLE_CLIENT_ID); url.searchParams.set("redirect_uri", googleCallback); url.searchParams.set("response_type", "code"); url.searchParams.set("scope", "openid email profile"); url.searchParams.set("state", state); url.searchParams.set("nonce", nonce); url.searchParams.set("code_challenge", challenge); url.searchParams.set("code_challenge_method", "S256"); url.searchParams.set("prompt", "select_account"); return reply.redirect(url.toString());

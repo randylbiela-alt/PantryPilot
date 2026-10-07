@@ -22,6 +22,7 @@ const schema = z.object({
  OPENAI_VISION_MODEL: z.string().default("gpt-4.1-mini"),
  LOG_LEVEL: z.string().default("info"),
  FRONTEND_APP_URL: optionalUrl,
+ SUPPORT_APP_URL: optionalUrl,
  AUTH_INVITE_ONLY: z.string().default("true").transform(value => value !== "false"),
  MICROSOFT_CLIENT_ID: optionalNonEmpty,
  MICROSOFT_CLIENT_SECRET: optionalNonEmpty,
