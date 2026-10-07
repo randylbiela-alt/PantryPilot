@@ -12,6 +12,7 @@ import { db } from "./db.js";
 import auth from "./auth.js";
 import { AppError } from "./errors.js";
 import { pantryRoutes } from "./pantry.js";
+import { spiceCabinetRoutes } from "./spice-cabinet.js";
 import { productConsolidationRoutes } from "./product-consolidation.js";
 import { groceryRoutes } from "./grocery.js";
 import { onboardingRoutes } from "./onboarding.js";
@@ -71,6 +72,7 @@ export async function buildApp(overrides?: Partial<Config>) {
  return { user: { id: userId, email: request.authUser!.primaryEmail, displayName: request.authUser!.displayName }, profile, onboardingRequired: memberships.length === 0 || !profile?.onboardingComplete, households: memberships.map(membership => ({ id: membership.householdId, name: membership.household.name, role: membership.role.toLowerCase() })), activeHouseholdId: firstMembership?.householdId ?? null, pantry: firstMembership?.household.pantryItems ?? [], groceryList: activeGroceryList ?? { id: null, name: "Current List", status: "ACTIVE", version: 1, items: [] }, mealPlan: firstMembership?.household.mealPlans[0] ?? null };
  });
  await pantryRoutes(app);
+ await spiceCabinetRoutes(app);
  await productConsolidationRoutes(app);
  await groceryRoutes(app);
  await onboardingRoutes(app);

@@ -81,6 +81,7 @@ model Household {
   mealPlans       MealPlan[]
   pantryItems     PantryItem[]
   recipes         Recipe[]
+  spiceCabinetItems SpiceCabinetItem[]
   consolidationSuppressions ConsolidationSuppression[]
   consolidationLearnings ConsolidationLearning[]
 }
@@ -95,6 +96,24 @@ model HouseholdMember {
 
   @@id([householdId, userId])
   @@index([userId, status])
+}
+
+
+model SpiceCabinetItem {
+  id              String    @id @default(uuid()) @db.Uuid
+  householdId     String    @db.Uuid
+  name            String
+  normalizedName  String
+  onHand          Boolean   @default(true)
+  version         Int       @default(1)
+  createdByUserId String    @db.Uuid
+  updatedByUserId String    @db.Uuid
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  household       Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, normalizedName])
+  @@index([householdId, onHand])
 }
 
 model PantryItem {
