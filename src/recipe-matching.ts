@@ -6,6 +6,7 @@ import { requireHousehold } from "./authorize.js";
 import { errors } from "./errors.js";
 import { normalizeName } from "./security.js";
 import { calculateRecommendations, type RecipeRecommendation } from "./intelligence.js";
+import { canonicalSpiceName } from "./spice-recognition.js";
 
 const params = z.object({ householdId: z.string().uuid(), recipeId: z.string().uuid() }).strict();
 const titleCase = (value: string) => value.split(" ").filter(Boolean).map(word => word.split("-").map(part => part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part).join("-")).join(" ");
@@ -69,11 +70,12 @@ export async function recipeMatchingRoutes(app: FastifyInstance): Promise<void> 
  const added: Array<{ id: string; name: string }> = [];
  let skipped = 0;
  for (const ingredient of match.missingIngredients) {
- const productName = shoppingName(ingredient.name);
+ const spiceName = canonicalSpiceName(ingredient.name);
+ const productName = spiceName ?? shoppingName(ingredient.name);
  const normalized = normalizeName(productName);
  if (existing.has(normalized)) { skipped += 1; continue; }
  const shortage = new Prisma.Decimal(ingredient.requiredQuantity).minus(ingredient.availableQuantity).toDecimalPlaces(3).toNumber();
- const displayName = `${productName} (${shortage} ${ingredient.unit})`;
+ const displayName = spiceName ?? `${productName} (${shortage} ${ingredient.unit})`;
  const created = await transaction.groceryListItem.create({ data: { groceryListId: list.id, name: displayName, normalizedName: normalized, checked: false } });
  existing.add(normalized);
  added.push({ id: created.id, name: displayName });
