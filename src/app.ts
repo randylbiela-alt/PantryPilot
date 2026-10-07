@@ -1,4 +1,4 @@
-﻿import Fastify from "fastify";
+import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -28,6 +28,7 @@ import { receiptImportRoutes } from "./receipt-import.js";
 import { recipeImportRoutes } from "./recipe-import.js";
 import { recipeUrlImportRoutes } from "./recipe-url-import.js";
 import { observabilityRoutes } from "./observability.js";
+import { supportRoutes } from "./support-routes.js";
 import { forecastingRoutes } from "./forecasting.js";
 import { inventoryHealthRoutes } from "./inventory-health.js";
 import { inventoryHistoryRoutes } from "./inventory-history.js";
@@ -85,6 +86,7 @@ export async function buildApp(overrides?: Partial<Config>) {
  await recipeImportRoutes(app);
  await recipeUrlImportRoutes(app);
  await observabilityRoutes(app);
+ await supportRoutes(app);
  await forecastingRoutes(app);
  await inventoryHealthRoutes(app);
  await inventoryHistoryRoutes(app);

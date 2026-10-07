@@ -12,6 +12,7 @@ model User {
   displayName     String?
   primaryEmail    String?
   status          UserStatus         @default(ACTIVE)
+  applicationRole ApplicationRole    @default(USER)
   createdAt       DateTime           @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime           @updatedAt @db.Timestamptz(6)
   lastLoginAt     DateTime?          @db.Timestamptz(6)
@@ -411,4 +412,11 @@ enum InventoryEventType {
   DISCARDED
   EXPIRED
   ARCHIVED
+}
+
+
+enum ApplicationRole {
+  USER
+  SUPPORT
+  SUPER_ADMIN
 }
