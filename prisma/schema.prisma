@@ -22,6 +22,11 @@ model User {
   memberships     HouseholdMember[]
   profile         UserProfile?
   sessions        UserSession[]
+  supportIssuesCreated SupportIssue[] @relation("SupportIssueCreator")
+  supportIssuesUpdated SupportIssue[] @relation("SupportIssueUpdater")
+  supportIssuesAssigned SupportIssue[] @relation("SupportIssueAssignee")
+  supportIssuesAffected SupportIssue[] @relation("SupportIssueAffectedUser")
+  supportIssueComments SupportIssueComment[] @relation("SupportIssueCommentAuthor")
 }
 
 model ExternalIdentity {
@@ -85,6 +90,7 @@ model Household {
   spiceCabinetItems SpiceCabinetItem[]
   consolidationSuppressions ConsolidationSuppression[]
   consolidationLearnings ConsolidationLearning[]
+  supportIssues SupportIssue[]
 }
 
 model HouseholdMember {
@@ -260,6 +266,51 @@ model RecipeIngredient {
   @@index([recipeId, sortOrder])
 }
 
+model SupportIssue {
+  id                  String               @id @default(uuid()) @db.Uuid
+  issueNumber         Int                  @unique @default(autoincrement())
+  title               String
+  description         String
+  status              SupportIssueStatus   @default(OPEN)
+  priority            SupportIssuePriority @default(MEDIUM)
+  category            SupportIssueCategory @default(OTHER)
+  affectedUserId      String?              @db.Uuid
+  affectedHouseholdId String?              @db.Uuid
+  assignedToUserId    String?              @db.Uuid
+  correlationId       String?
+  resolutionNotes     String?
+  version             Int                  @default(1)
+  createdByUserId     String               @db.Uuid
+  updatedByUserId     String               @db.Uuid
+  createdAt           DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime             @updatedAt @db.Timestamptz(6)
+  resolvedAt          DateTime?            @db.Timestamptz(6)
+  closedAt            DateTime?            @db.Timestamptz(6)
+  affectedUser        User?                @relation("SupportIssueAffectedUser", fields: [affectedUserId], references: [id])
+  affectedHousehold   Household?           @relation(fields: [affectedHouseholdId], references: [id])
+  assignedToUser      User?                @relation("SupportIssueAssignee", fields: [assignedToUserId], references: [id])
+  createdByUser       User                 @relation("SupportIssueCreator", fields: [createdByUserId], references: [id])
+  updatedByUser       User                 @relation("SupportIssueUpdater", fields: [updatedByUserId], references: [id])
+  comments            SupportIssueComment[]
+
+  @@index([status, priority, updatedAt])
+  @@index([affectedUserId, updatedAt])
+  @@index([affectedHouseholdId, updatedAt])
+  @@index([assignedToUserId, status])
+}
+
+model SupportIssueComment {
+  id           String       @id @default(uuid()) @db.Uuid
+  issueId      String       @db.Uuid
+  authorUserId String       @db.Uuid
+  body         String
+  createdAt    DateTime     @default(now()) @db.Timestamptz(6)
+  issue        SupportIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  author       User         @relation("SupportIssueCommentAuthor", fields: [authorUserId], references: [id])
+
+  @@index([issueId, createdAt])
+}
+
 model AuditEvent {
   id            String   @id @default(uuid()) @db.Uuid
   occurredAt    DateTime @default(now()) @db.Timestamptz(6)
@@ -414,6 +465,38 @@ enum InventoryEventType {
   ARCHIVED
 }
 
+
+enum SupportIssueStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_FOR_USER
+  READY_FOR_VALIDATION
+  RESOLVED
+  CLOSED
+  DUPLICATE
+}
+
+enum SupportIssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SupportIssueCategory {
+  AUTHENTICATION
+  HOUSEHOLD_ACCESS
+  PANTRY_DATA
+  SHOPPING
+  RECIPES
+  MEALS
+  IMPORT
+  ANALYTICS
+  PERFORMANCE
+  DISPLAY
+  DATA
+  OTHER
+}
 
 enum ApplicationRole {
   USER
