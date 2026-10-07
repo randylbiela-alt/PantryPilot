@@ -36,14 +36,46 @@ const shoppingName = (value: string) => {
 };
 
 async function calculateMatch(householdId: string, recipeId: string): Promise<RecipeRecommendation> {
- const [recipe, pantry] = await Promise.all([
- db.recipe.findFirst({ where: { id: recipeId, householdId }, include: { ingredients: { orderBy: { sortOrder: "asc" } } } }),
- db.pantryItem.findMany({ where: { householdId, archivedAt: null } })
+ const [recipe, pantry, spiceCabinet] = await Promise.all([
+  db.recipe.findFirst({ where: { id: recipeId, householdId }, include: { ingredients: { orderBy: { sortOrder: "asc" } } } }),
+  db.pantryItem.findMany({ where: { householdId, archivedAt: null } }),
+  db.spiceCabinetItem.findMany({ where: { householdId }, select: { name: true, onHand: true } })
  ]);
  if (!recipe) throw errors.notFound();
- const match = calculateRecommendations([recipe], pantry)[0];
- if (!match) throw errors.notFound();
- return match;
+ const baseMatch = calculateRecommendations([recipe], pantry)[0];
+ if (!baseMatch) throw errors.notFound();
+
+ const cabinetAvailability = new Map<string, boolean>();
+ for (const item of spiceCabinet) {
+  const canonical = canonicalSpiceName(item.name);
+  if (canonical) cabinetAvailability.set(normalizeName(canonical), item.onHand);
+ }
+
+ const spiceKeys = new Set(recipe.ingredients
+  .map(ingredient => canonicalSpiceName(ingredient.name))
+  .filter((name): name is string => name !== null)
+  .map(name => normalizeName(name)));
+ const missingIngredients = baseMatch.missingIngredients.filter(ingredient => {
+  const canonical = canonicalSpiceName(ingredient.name);
+  return !canonical || !spiceKeys.has(normalizeName(canonical));
+ });
+
+ for (const ingredient of recipe.ingredients) {
+  const canonical = canonicalSpiceName(ingredient.name);
+  if (!canonical) continue;
+  const cabinetKey = normalizeName(canonical);
+  if (cabinetAvailability.get(cabinetKey) === true) continue;
+  missingIngredients.push({
+   name: canonical,
+   requiredQuantity: new Prisma.Decimal(ingredient.quantity).toDecimalPlaces(3).toNumber(),
+   availableQuantity: 0,
+   unit: ingredient.unit
+  });
+ }
+
+ const availableIngredients = Math.max(0, baseMatch.totalIngredients - missingIngredients.length);
+ const score = baseMatch.totalIngredients === 0 ? 100 : Math.round((availableIngredients / baseMatch.totalIngredients) * 100);
+ return { ...baseMatch, score, availableIngredients, missingIngredients };
 }
 
 async function audit(request: FastifyRequest, householdId: string, recipeId: string, action: string, metadata: Prisma.InputJsonValue) {
