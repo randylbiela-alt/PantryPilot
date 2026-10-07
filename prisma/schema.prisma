@@ -27,6 +27,9 @@ model User {
   supportIssuesAssigned SupportIssue[] @relation("SupportIssueAssignee")
   supportIssuesAffected SupportIssue[] @relation("SupportIssueAffectedUser")
   supportIssueComments SupportIssueComment[] @relation("SupportIssueCommentAuthor")
+  supportReleasesCreated SupportRelease[] @relation("SupportReleaseCreator")
+  supportReleasesUpdated SupportRelease[] @relation("SupportReleaseUpdater")
+  releaseValidations SupportReleaseValidation[] @relation("ReleaseValidationUpdater")
 }
 
 model ExternalIdentity {
@@ -311,6 +314,48 @@ model SupportIssueComment {
   @@index([issueId, createdAt])
 }
 
+model SupportRelease {
+  id String @id @default(uuid()) @db.Uuid
+  version String @unique
+  name String
+  description String
+  status SupportReleaseStatus @default(PLANNED)
+  environment SupportReleaseEnvironment @default(PREVIEW)
+  releaseNotes String?
+  validationNotes String?
+  backendCommit String?
+  frontendCommit String?
+  supportCommit String?
+  railwayUrl String?
+  vercelPreviewUrl String?
+  productionUrl String?
+  versionNumber Int @default(1)
+  createdByUserId String @db.Uuid
+  updatedByUserId String @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  previewDeployedAt DateTime? @db.Timestamptz(6)
+  productionDeployedAt DateTime? @db.Timestamptz(6)
+  createdByUser User @relation("SupportReleaseCreator", fields:[createdByUserId], references:[id])
+  updatedByUser User @relation("SupportReleaseUpdater", fields:[updatedByUserId], references:[id])
+  validations SupportReleaseValidation[]
+  @@index([status, updatedAt])
+}
+model SupportReleaseValidation {
+  id String @id @default(uuid()) @db.Uuid
+  releaseId String @db.Uuid
+  name String
+  result SupportValidationResult @default(NOT_STARTED)
+  notes String?
+  sortOrder Int @default(0)
+  updatedByUserId String @db.Uuid
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  release SupportRelease @relation(fields:[releaseId], references:[id], onDelete:Cascade)
+  updatedByUser User @relation("ReleaseValidationUpdater", fields:[updatedByUserId], references:[id])
+  @@unique([releaseId,name])
+  @@index([releaseId,sortOrder])
+}
+
 model AuditEvent {
   id            String   @id @default(uuid()) @db.Uuid
   occurredAt    DateTime @default(now()) @db.Timestamptz(6)
@@ -496,6 +541,32 @@ enum SupportIssueCategory {
   DISPLAY
   DATA
   OTHER
+}
+
+enum SupportReleaseStatus {
+  PLANNED
+  IN_DEVELOPMENT
+  READY_FOR_PREVIEW
+  PREVIEW_VALIDATION
+  BLOCKED
+  READY_FOR_PRODUCTION
+  PRODUCTION
+  ROLLED_BACK
+  ARCHIVED
+}
+
+enum SupportReleaseEnvironment {
+  LOCAL
+  PREVIEW
+  PRODUCTION
+}
+
+enum SupportValidationResult {
+  NOT_STARTED
+  PASS
+  FAIL
+  BLOCKED
+  NOT_APPLICABLE
 }
 
 enum ApplicationRole {
