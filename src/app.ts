@@ -29,6 +29,7 @@ import { recipeImportRoutes } from "./recipe-import.js";
 import { recipeUrlImportRoutes } from "./recipe-url-import.js";
 import { observabilityRoutes } from "./observability.js";
 import { supportRoutes } from "./support-routes.js";
+import { feedbackRoutes } from "./feedback-routes.js";
 import { featureEvaluationRoutes } from "./feature-evaluation-routes.js";
 import { rolloutOperationsRoutes } from "./rollout-operations-routes.js";
 import { forecastingRoutes } from "./forecasting.js";
@@ -47,7 +48,7 @@ export async function buildApp(overrides?: Partial<Config>) {
  app.addHook("onRequest", async request => { request.correlationId = request.id; });
  app.addHook("onSend", async (request, reply, payload) => { reply.header("X-Correlation-ID", request.correlationId); return payload; });
  await app.register(cookie, { secret: config.COOKIE_SECRET });
- await app.register(cors, { origin: config.CORS_ORIGIN, credentials: true, methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["Authorization", "Content-Type", "X-Client-Version", "X-Correlation-ID"], exposedHeaders: ["X-Correlation-ID"] });
+ await app.register(cors, { origin: config.CORS_ORIGIN, credentials: true, methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["Authorization", "Content-Type", "X-Client-Version", "X-Correlation-ID", "X-Idempotency-Key"], exposedHeaders: ["X-Correlation-ID", "X-Idempotency-Key"] });
  await app.register(helmet);
  await app.register(rateLimit, { max: 200, timeWindow: "1 minute" });
  await app.register(swagger, { openapi: { info: { title: "PantryPilot API", version: "1.0.0" } } });
@@ -89,6 +90,7 @@ export async function buildApp(overrides?: Partial<Config>) {
  await recipeUrlImportRoutes(app);
  await observabilityRoutes(app);
  await supportRoutes(app);
+ await feedbackRoutes(app);
  await featureEvaluationRoutes(app);
  await rolloutOperationsRoutes(app);
  await forecastingRoutes(app);
