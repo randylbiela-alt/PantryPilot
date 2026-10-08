@@ -30,6 +30,9 @@ model User {
   supportReleasesCreated SupportRelease[] @relation("SupportReleaseCreator")
   supportReleasesUpdated SupportRelease[] @relation("SupportReleaseUpdater")
   releaseValidations SupportReleaseValidation[] @relation("ReleaseValidationUpdater")
+  betaEnrollments BetaEnrollment[] @relation("BetaEnrollmentUser")
+  betaEnrollmentsCreated BetaEnrollment[] @relation("BetaEnrollmentCreator")
+  featureFlagsUpdated FeatureFlag[] @relation("FeatureFlagUpdater")
 }
 
 model ExternalIdentity {
@@ -356,6 +359,31 @@ model SupportReleaseValidation {
   @@index([releaseId,sortOrder])
 }
 
+
+model FeatureFlag {
+  id                String              @id @default(uuid()) @db.Uuid
+  key               String              @unique
+  description       String
+  rollout           FeatureRollout      @default(OFF)
+  previewEnabled    Boolean             @default(false)
+  productionEnabled Boolean             @default(false)
+  percentage        Int                 @default(0)
+  version           Int                 @default(1)
+  updatedByUserId   String              @db.Uuid
+  createdAt         DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(6)
+  updatedByUser     User                @relation("FeatureFlagUpdater", fields: [updatedByUserId], references: [id])
+  @@index([rollout, updatedAt])
+}
+model BetaEnrollment {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @unique @db.Uuid
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  user            User     @relation("BetaEnrollmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdByUser   User     @relation("BetaEnrollmentCreator", fields: [createdByUserId], references: [id])
+  @@index([createdAt])
+}
 model AuditEvent {
   id            String   @id @default(uuid()) @db.Uuid
   occurredAt    DateTime @default(now()) @db.Timestamptz(6)
@@ -573,4 +601,12 @@ enum ApplicationRole {
   USER
   SUPPORT
   SUPER_ADMIN
+}
+
+enum FeatureRollout {
+  OFF
+  INTERNAL
+  BETA
+  PERCENTAGE
+  GLOBAL
 }

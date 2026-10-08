@@ -1,0 +1,10 @@
+CREATE TYPE "FeatureRollout" AS ENUM ('OFF', 'INTERNAL', 'BETA', 'PERCENTAGE', 'GLOBAL');
+CREATE TABLE "FeatureFlag" ("id" UUID NOT NULL, "key" TEXT NOT NULL, "description" TEXT NOT NULL, "rollout" "FeatureRollout" NOT NULL DEFAULT 'OFF', "previewEnabled" BOOLEAN NOT NULL DEFAULT false, "productionEnabled" BOOLEAN NOT NULL DEFAULT false, "percentage" INTEGER NOT NULL DEFAULT 0, "version" INTEGER NOT NULL DEFAULT 1, "updatedByUserId" UUID NOT NULL, "createdAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT "FeatureFlag_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "BetaEnrollment" ("id" UUID NOT NULL, "userId" UUID NOT NULL, "createdByUserId" UUID NOT NULL, "createdAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "BetaEnrollment_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "FeatureFlag_key_key" ON "FeatureFlag"("key");
+CREATE INDEX "FeatureFlag_rollout_updatedAt_idx" ON "FeatureFlag"("rollout", "updatedAt");
+CREATE UNIQUE INDEX "BetaEnrollment_userId_key" ON "BetaEnrollment"("userId");
+CREATE INDEX "BetaEnrollment_createdAt_idx" ON "BetaEnrollment"("createdAt");
+ALTER TABLE "FeatureFlag" ADD CONSTRAINT "FeatureFlag_updatedByUserId_fkey" FOREIGN KEY ("updatedByUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "BetaEnrollment" ADD CONSTRAINT "BetaEnrollment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "BetaEnrollment" ADD CONSTRAINT "BetaEnrollment_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

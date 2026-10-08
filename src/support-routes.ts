@@ -202,4 +202,66 @@ export async function supportRoutes(app: FastifyInstance) {
   app.patch("/api/v1/support/releases/:releaseId",async request=>{requireSupport(request);const {releaseId}=z.object({releaseId:z.string().uuid()}).parse(request.params);const input=z.object({versionNumber:z.number().int().positive(),status:releaseStatus.optional(),environment:releaseEnvironment.optional(),releaseNotes:z.string().trim().max(20000).nullable().optional(),validationNotes:z.string().trim().max(20000).nullable().optional(),backendCommit:z.string().trim().max(120).nullable().optional(),frontendCommit:z.string().trim().max(120).nullable().optional(),supportCommit:z.string().trim().max(120).nullable().optional(),railwayUrl:z.string().url().nullable().optional(),vercelPreviewUrl:z.string().url().nullable().optional(),productionUrl:z.string().url().nullable().optional()}).strict().parse(request.body);const actor=request.authUser!.id;const {versionNumber,...changes}=input;const data={...(changes.status!==undefined?{status:changes.status}:{}),...(changes.environment!==undefined?{environment:changes.environment}:{}),...(changes.releaseNotes!==undefined?{releaseNotes:changes.releaseNotes}:{}),...(changes.validationNotes!==undefined?{validationNotes:changes.validationNotes}:{}),...(changes.backendCommit!==undefined?{backendCommit:changes.backendCommit}:{}),...(changes.frontendCommit!==undefined?{frontendCommit:changes.frontendCommit}:{}),...(changes.supportCommit!==undefined?{supportCommit:changes.supportCommit}:{}),...(changes.railwayUrl!==undefined?{railwayUrl:changes.railwayUrl}:{}),...(changes.vercelPreviewUrl!==undefined?{vercelPreviewUrl:changes.vercelPreviewUrl}:{}),...(changes.productionUrl!==undefined?{productionUrl:changes.productionUrl}:{}),updatedByUserId:actor,versionNumber:{increment:1},...(changes.status==="PREVIEW_VALIDATION"?{previewDeployedAt:new Date()}:{}),...(changes.status==="PRODUCTION"?{productionDeployedAt:new Date()}:{})};return db.$transaction(async tx=>{const changed=await tx.supportRelease.updateMany({where:{id:releaseId,versionNumber},data});if(changed.count!==1)throw errors.conflict();const item=await tx.supportRelease.findUniqueOrThrow({where:{id:releaseId},select:releaseSelect});await tx.auditEvent.create({data:{actorUserId:actor,action:"support.release.updated",resourceType:"SupportRelease",resourceId:item.id,result:"success",correlationId:request.correlationId,metadata:{version:item.version,status:item.status}}});return item;});});
   app.patch("/api/v1/support/releases/:releaseId/validations/:validationId",async request=>{requireSupport(request);const params=z.object({releaseId:z.string().uuid(),validationId:z.string().uuid()}).parse(request.params);const input=z.object({result:validationResult,notes:z.string().trim().max(5000).nullable().optional()}).strict().parse(request.body);const actor=request.authUser!.id;return db.$transaction(async tx=>{const item=await tx.supportReleaseValidation.update({where:{id:params.validationId},data:{result:input.result,...(input.notes!==undefined?{notes:input.notes}:{}),updatedByUserId:actor},select:{id:true,name:true,result:true,notes:true,sortOrder:true,updatedAt:true}});await tx.auditEvent.create({data:{actorUserId:actor,action:"support.release.validation_updated",resourceType:"SupportRelease",resourceId:params.releaseId,result:"success",correlationId:request.correlationId,metadata:{validation:item.name,result:item.result}}});return item;});});
 
+  const rolloutStatus = z.enum(["OFF", "INTERNAL", "BETA", "PERCENTAGE", "GLOBAL"]);
+  const featureFlagParams = z.object({ featureKey: z.string().trim().min(1).max(120) }).strict();
+  const featureFlagInput = z.object({ version: z.number().int().positive(), rollout: rolloutStatus, previewEnabled: z.boolean(), productionEnabled: z.boolean(), percentage: z.number().int().min(0).max(100) }).strict().superRefine((input, context) => { if (input.rollout !== "PERCENTAGE" && input.percentage !== 0) context.addIssue({ code: "custom", path: ["percentage"], message: "Percentage must be zero unless the rollout strategy is PERCENTAGE." }); });
+  const defaultFlags = [
+    { key: "inventory-intelligence-v2", description: "Next-generation pantry and inventory intelligence." },
+    { key: "smart-shopping-v2", description: "Enhanced shopping recommendations and list automation." },
+    { key: "recipe-assistant-v2", description: "Expanded recipe assistance and pantry-aware guidance." },
+    { key: "consumption-forecasting-v2", description: "Improved household consumption forecasting." },
+    { key: "household-insights-v2", description: "Advanced household activity and inventory insights." },
+  ];
+  async function ensureAdministrationFlags(actorUserId: string) {
+    await Promise.all(defaultFlags.map(flag => db.featureFlag.upsert({ where: { key: flag.key }, update: {}, create: { ...flag, updatedByUserId: actorUserId } })));
+  }
+  app.get("/api/v1/support/administration", async request => {
+    requireSupport(request);
+    await ensureAdministrationFlags(request.authUser!.id);
+    const [flags, betaUsers, audit] = await Promise.all([
+      db.featureFlag.findMany({ orderBy: { key: "asc" } }),
+      db.betaEnrollment.findMany({ orderBy: { createdAt: "desc" }, select: { id: true, createdAt: true, user: { select: { id: true, displayName: true, primaryEmail: true, status: true } }, createdByUser: { select: { displayName: true, primaryEmail: true } } } }),
+      db.auditEvent.findMany({ where: { action: { startsWith: "support.administration." } }, orderBy: { occurredAt: "desc" }, take: 100 }),
+    ]);
+    return { flags, betaUsers, audit };
+  });
+  app.patch("/api/v1/support/administration/flags/:featureKey", async request => {
+    requireSupport(request);
+    const { featureKey } = featureFlagParams.parse(request.params);
+    const input = featureFlagInput.parse(request.body);
+    const actor = request.authUser!.id;
+    return db.$transaction(async tx => {
+      const changed = await tx.featureFlag.updateMany({ where: { key: featureKey, version: input.version }, data: { rollout: input.rollout, previewEnabled: input.previewEnabled, productionEnabled: input.productionEnabled, percentage: input.percentage, version: { increment: 1 }, updatedByUserId: actor } });
+      if (changed.count !== 1) throw errors.conflict();
+      const flag = await tx.featureFlag.findUniqueOrThrow({ where: { key: featureKey } });
+      await tx.auditEvent.create({ data: { actorUserId: actor, action: "support.administration.flag.updated", resourceType: "FeatureFlag", resourceId: flag.id, result: "success", correlationId: request.correlationId, metadata: { key: flag.key, rollout: flag.rollout, previewEnabled: flag.previewEnabled, productionEnabled: flag.productionEnabled, percentage: flag.percentage } } });
+      return flag;
+    });
+  });
+  app.post("/api/v1/support/administration/beta-users", async (request, reply) => {
+    requireSupport(request);
+    const { email } = z.object({ email: z.string().trim().email().max(320) }).strict().parse(request.body);
+    const actor = request.authUser!.id;
+    const user = await db.user.findFirst({ where: { primaryEmail: { equals: email, mode: "insensitive" }, status: "ACTIVE" } });
+    if (!user) throw errors.notFound();
+    const enrollment = await db.$transaction(async tx => {
+      const created = await tx.betaEnrollment.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id, createdByUserId: actor }, select: { id: true, createdAt: true, user: { select: { id: true, displayName: true, primaryEmail: true, status: true } } } });
+      await tx.auditEvent.create({ data: { actorUserId: actor, action: "support.administration.beta_user.added", resourceType: "BetaEnrollment", resourceId: created.id, result: "success", correlationId: request.correlationId, metadata: { userId: user.id, email: user.primaryEmail } } });
+      return created;
+    });
+    return reply.code(201).send(enrollment);
+  });
+  app.delete("/api/v1/support/administration/beta-users/:enrollmentId", async (request, reply) => {
+    requireSupport(request);
+    const { enrollmentId } = z.object({ enrollmentId: z.string().uuid() }).strict().parse(request.params);
+    const actor = request.authUser!.id;
+    await db.$transaction(async tx => {
+      const enrollment = await tx.betaEnrollment.findUnique({ where: { id: enrollmentId }, include: { user: true } });
+      if (!enrollment) throw errors.notFound();
+      await tx.betaEnrollment.delete({ where: { id: enrollmentId } });
+      await tx.auditEvent.create({ data: { actorUserId: actor, action: "support.administration.beta_user.removed", resourceType: "BetaEnrollment", resourceId: enrollmentId, result: "success", correlationId: request.correlationId, metadata: { userId: enrollment.userId, email: enrollment.user.primaryEmail } } });
+    });
+    return reply.code(204).send();
+  });
+
 }
