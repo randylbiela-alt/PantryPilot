@@ -1,0 +1,1 @@
+import { describe,expect,it } from "vitest";import { stableFeatureBucket } from "./feature-evaluation.js";describe("rollout operations",()=>{it("simulates stable thresholds",()=>{const bucket=stableFeatureBucket("user-1","flag-1");expect(bucket).toBeGreaterThanOrEqual(0);expect(bucket).toBeLessThan(100);expect(bucket<100).toBe(true);expect(bucket<0).toBe(false);});});

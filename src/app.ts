@@ -30,6 +30,7 @@ import { recipeUrlImportRoutes } from "./recipe-url-import.js";
 import { observabilityRoutes } from "./observability.js";
 import { supportRoutes } from "./support-routes.js";
 import { featureEvaluationRoutes } from "./feature-evaluation-routes.js";
+import { rolloutOperationsRoutes } from "./rollout-operations-routes.js";
 import { forecastingRoutes } from "./forecasting.js";
 import { inventoryHealthRoutes } from "./inventory-health.js";
 import { inventoryHistoryRoutes } from "./inventory-history.js";
@@ -89,6 +90,7 @@ export async function buildApp(overrides?: Partial<Config>) {
  await observabilityRoutes(app);
  await supportRoutes(app);
  await featureEvaluationRoutes(app);
+ await rolloutOperationsRoutes(app);
  await forecastingRoutes(app);
  await inventoryHealthRoutes(app);
  await inventoryHistoryRoutes(app);
