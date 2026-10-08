@@ -19,6 +19,19 @@ function reason(flag: any, user: any, beta: boolean, environment: FeatureEnviron
 }
 function enabled(flag:any,user:any,beta:boolean,environment:FeatureEnvironment){return evaluateFeature({featureKey:flag.key,rollout:flag.rollout,percentage:flag.percentage,previewEnabled:flag.previewEnabled,productionEnabled:flag.productionEnabled,environment,userId:user.id,applicationRole:user.applicationRole,betaEnrolled:beta});}
 
+async function findUserByQuery(query: string) {
+  const parsedId = z.string().uuid().safeParse(query);
+  if (parsedId.success) {
+    return db.user.findUnique({
+      where: { id: parsedId.data },
+      select: { id: true, displayName: true, primaryEmail: true, status: true, applicationRole: true },
+    });
+  }
+  return db.user.findFirst({
+    where: { primaryEmail: { equals: query, mode: "insensitive" } },
+    select: { id: true, displayName: true, primaryEmail: true, status: true, applicationRole: true },
+  });
+}
 export async function rolloutOperationsRoutes(app: FastifyInstance) {
   app.get("/api/v1/support/rollout-operations/summary", async request => {
     requireSupport(request);
@@ -35,7 +48,7 @@ export async function rolloutOperationsRoutes(app: FastifyInstance) {
   app.get("/api/v1/support/rollout-operations/user", async request => {
     requireSupport(request);
     const { query } = z.object({ query:z.string().trim().min(1).max(320) }).strict().parse(request.query);
-    const user = await db.user.findFirst({ where: { OR:[{id:query},{primaryEmail:{equals:query,mode:"insensitive"}}] }, select:{id:true,displayName:true,primaryEmail:true,status:true,applicationRole:true} });
+    const user = await findUserByQuery(query);
     if (!user) throw errors.notFound();
     const [flags, enrollment] = await Promise.all([db.featureFlag.findMany({orderBy:{key:"asc"}}),db.betaEnrollment.findUnique({where:{userId:user.id},select:{id:true}})]);
     const beta=Boolean(enrollment);
@@ -44,7 +57,7 @@ export async function rolloutOperationsRoutes(app: FastifyInstance) {
   app.post("/api/v1/support/rollout-operations/simulate", async request => {
     requireSupport(request);
     const { query, featureKey, proposedPercentage } = z.object({query:z.string().trim().min(1).max(320),featureKey:z.string().trim().min(1).max(120),proposedPercentage:z.number().int().min(0).max(100)}).strict().parse(request.body);
-    const [user,flag]=await Promise.all([db.user.findFirst({where:{OR:[{id:query},{primaryEmail:{equals:query,mode:"insensitive"}}]},select:{id:true,displayName:true,primaryEmail:true}}),db.featureFlag.findUnique({where:{key:featureKey}})]);
+    const [user,flag]=await Promise.all([findUserByQuery(query),db.featureFlag.findUnique({where:{key:featureKey}})]);
     if(!user||!flag) throw errors.notFound();
     const bucket=stableFeatureBucket(user.id,featureKey);
     return { user, featureKey, bucket, currentPercentage:flag.percentage, proposedPercentage, currentEnabled:bucket<flag.percentage, proposedEnabled:bucket<proposedPercentage, thresholds:[10,25,50,75,100].map(percentage=>({percentage,enabled:bucket<percentage})) };
