@@ -129,8 +129,9 @@ export async function recipeMatchingRoutes(app: FastifyInstance): Promise<void> 
 
  app.post("/api/v1/households/:householdId/recipes/:recipeId/add-missing-to-grocery", async request => {
  const { householdId, recipeId } = params.parse(request.params);
+ const { desiredServings } = matchQuery.parse(request.query);
  await requireHousehold(request, householdId, true);
- const match = await calculateMatch(householdId, recipeId);
+ const match = await calculateMatch(householdId, recipeId, desiredServings);
  return db.$transaction(async transaction => {
  let list = await transaction.groceryList.findFirst({ where: { householdId, status: "ACTIVE" }, include: { items: true }, orderBy: { updatedAt: "desc" } });
  if (!list) list = await transaction.groceryList.create({ data: { householdId, name: "Current List", status: "ACTIVE", createdByUserId: request.authUser!.id }, include: { items: true } });
