@@ -142,7 +142,7 @@ export async function cookingSessionRoutes(app: FastifyInstance): Promise<void> 
       if (!session || session.status === "COMPLETED") throw errors.conflict();
       for (const override of input.overrides) { if (override.action === "USE" && override.pantryItemId && override.remember) await tx.recipeIngredientPantryMapping.upsert({ where: { householdId_recipeId_ingredientNormalizedName: { householdId, recipeId: session.recipeId, ingredientNormalizedName: override.ingredientKey } }, create: { householdId, recipeId: session.recipeId, ingredientNormalizedName: override.ingredientKey, pantryItemId: override.pantryItemId, confirmedByUserId: request.authUser!.id, matchMethod: "MANUAL" }, update: { pantryItemId: override.pantryItemId, confirmedByUserId: request.authUser!.id, matchMethod: "MANUAL" } }); }
       for (const ingredient of preview.ingredients) for (const allocation of ingredient.allocations) {
-        const changed = await tx.pantryItem.updateMany({ where: { id: allocation.pantryItemId, householdId, version: allocation.version, archivedAt: null }, data: { quantity: allocation.quantityAfter, updatedByUserId: request.authUser!.id, version: { increment: 1 } } });
+        const changed = await tx.pantryItem.updateMany({ where: { id: allocation.pantryItemId, householdId, version: allocation.version, archivedAt: null }, data: { quantity: allocation.quantityAfter, archivedAt: allocation.quantityAfter === 0 ? new Date() : null, updatedByUserId: request.authUser!.id, version: { increment: 1 } } });
         if (changed.count !== 1) throw errors.conflict();
         await tx.inventoryEvent.create({ data: { householdId, pantryItemId: allocation.pantryItemId, pantryItemName: allocation.pantryItemName, type: "CONSUMED", quantityBefore: allocation.quantityBefore, quantityAfter: allocation.quantityAfter, quantityDelta: -allocation.quantityUsed, unit: allocation.unit, reason: `Recipe completion: ${ingredient.name}`, actorUserId: request.authUser!.id, correlationId } });
       }
@@ -159,10 +159,10 @@ export async function cookingSessionRoutes(app: FastifyInstance): Promise<void> 
       const events = await tx.inventoryEvent.findMany({ where: { householdId, correlationId, type: "CONSUMED" }, orderBy: { occurredAt: "desc" } });
       if (events.length === 0) throw errors.notFound();
       for (const event of events) {
-        const item = await tx.pantryItem.findFirst({ where: { id: event.pantryItemId, householdId, archivedAt: null } });
+        const item = await tx.pantryItem.findFirst({ where: { id: event.pantryItemId, householdId } });
         if (!item) throw errors.conflict();
         const before = new Prisma.Decimal(item.quantity); const after = before.minus(event.quantityDelta);
-        await tx.pantryItem.update({ where: { id: item.id }, data: { quantity: after, updatedByUserId: request.authUser!.id, version: { increment: 1 } } });
+        await tx.pantryItem.update({ where: { id: item.id }, data: { quantity: after, archivedAt: null, updatedByUserId: request.authUser!.id, version: { increment: 1 } } });
         await tx.inventoryEvent.create({ data: { householdId, pantryItemId: item.id, pantryItemName: item.name, type: "ADJUSTED", quantityBefore: before, quantityAfter: after, quantityDelta: after.minus(before), unit: item.unit, reason: `Undo recipe completion ${sessionId}`, actorUserId: request.authUser!.id, correlationId: `undo:${correlationId}` } });
       }
       return { restored: events.length };
