@@ -264,4 +264,109 @@ export async function supportRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
+  const recoveryParams = z.object({ userId: z.string().uuid() }).strict();
+  const recoveryInput = z.object({
+    mode: z.enum(["SESSIONS", "PROFILE", "ONBOARDING", "SAFE_BETA_RESET"]),
+    reason: z.string().trim().min(10).max(500),
+    confirmation: z.string().trim().min(1).max(320),
+  }).strict();
+  const requireSuperAdmin = (request: FastifyRequest) => {
+    requireSupport(request);
+    if (request.authUser!.applicationRole !== "SUPER_ADMIN") throw errors.forbidden();
+  };
+  const recoveryPreview = async (userId: string) => {
+    const now = new Date();
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true, displayName: true, primaryEmail: true, status: true, applicationRole: true,
+        profile: true,
+        betaEnrollments: { select: { id: true, createdAt: true } },
+        memberships: {
+          select: {
+            role: true, status: true,
+            household: { select: { id: true, name: true, _count: { select: { members: true, pantryItems: true, groceryLists: true, recipes: true, mealPlans: true } } } },
+          },
+        },
+      },
+    });
+    if (!user) throw errors.notFound();
+    const [totalSessions, activeSessions, linkedIssues] = await Promise.all([
+      db.userSession.count({ where: { userId } }),
+      db.userSession.count({ where: { userId, revokedAt: null, expiresAt: { gt: now }, absoluteExpiresAt: { gt: now } } }),
+      db.supportIssue.count({ where: { affectedUserId: userId } }),
+    ]);
+    return {
+      user,
+      impact: {
+        totalSessions, activeSessions, linkedIssues,
+        profileExists: Boolean(user.profile),
+        onboardingComplete: user.profile?.onboardingComplete ?? false,
+        betaEnrolled: user.betaEnrollments.length > 0,
+        householdMemberships: user.memberships.length,
+        ownedHouseholds: user.memberships.filter(item => item.role === "OWNER" && item.status === "ACTIVE").length,
+        sharedHouseholds: user.memberships.filter(item => item.household._count.members > 1).length,
+      },
+      preserved: ["User identity", "External login identity", "Beta enrollment", "Household memberships", "Household data", "Support issues", "Feedback", "Audit history"],
+      safeguards: ["No household data is deleted", "No membership is removed", "Destructive actions require SUPER_ADMIN", "Every recovery action is audited"],
+    };
+  };
+
+  app.get("/api/v1/support/users/:userId/recovery-preview", async request => {
+    requireSupport(request);
+    const { userId } = recoveryParams.parse(request.params);
+    return recoveryPreview(userId);
+  });
+
+  app.get("/api/v1/support/users/:userId/recovery-history", async request => {
+    requireSupport(request);
+    const { userId } = recoveryParams.parse(request.params);
+    const items = await db.auditEvent.findMany({
+      where: { resourceType: "UserRecovery", resourceId: userId },
+      orderBy: { occurredAt: "desc" }, take: 25,
+      select: { id: true, occurredAt: true, actorUserId: true, action: true, result: true, correlationId: true, metadata: true },
+    });
+    return { items };
+  });
+
+  app.post("/api/v1/support/users/:userId/recovery-actions", async (request, reply) => {
+    requireSuperAdmin(request);
+    const { userId } = recoveryParams.parse(request.params);
+    const input = recoveryInput.parse(request.body);
+    if (request.authUser!.id === userId) throw errors.forbidden();
+    const preview = await recoveryPreview(userId);
+    const targetEmail = preview.user.primaryEmail?.trim().toLowerCase();
+    if (!targetEmail || input.confirmation.toLowerCase() !== targetEmail) throw errors.forbidden();
+    const now = new Date();
+    const result = await db.$transaction(async tx => {
+      let revokedSessions = 0;
+      let profileReset = false;
+      let onboardingReset = false;
+      if (["SESSIONS", "ONBOARDING", "SAFE_BETA_RESET"].includes(input.mode)) {
+        const updated = await tx.userSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } });
+        revokedSessions = updated.count;
+      }
+      if (["PROFILE", "SAFE_BETA_RESET"].includes(input.mode)) {
+        await tx.userProfile.upsert({
+          where: { userId },
+          create: { userId, householdSizeDefault: 1, weeklyBudget: null, defaultDiet: "No restrictions", onboardingComplete: false, locale: "en-US", timeZone: "America/Indiana/Indianapolis", version: 1 },
+          update: { householdSizeDefault: 1, weeklyBudget: null, defaultDiet: "No restrictions", locale: "en-US", timeZone: "America/Indiana/Indianapolis", version: { increment: 1 }, ...(input.mode === "SAFE_BETA_RESET" ? { onboardingComplete: false } : {}) },
+        });
+        profileReset = true;
+        onboardingReset = input.mode === "SAFE_BETA_RESET";
+      }
+      if (input.mode === "ONBOARDING") {
+        await tx.userProfile.upsert({ where: { userId }, create: { userId, onboardingComplete: false }, update: { onboardingComplete: false, version: { increment: 1 } } });
+        onboardingReset = true;
+      }
+      await tx.auditEvent.create({ data: {
+        actorUserId: request.authUser!.id, action: `support.recovery.${input.mode.toLowerCase()}`,
+        resourceType: "UserRecovery", resourceId: userId, result: "success", correlationId: request.correlationId,
+        metadata: { targetUserId: userId, targetEmail: preview.user.primaryEmail, mode: input.mode, reason: input.reason, revokedSessions, profileReset, onboardingReset, preserved: preview.preserved },
+      } });
+      return { mode: input.mode, revokedSessions, profileReset, onboardingReset };
+    });
+    return reply.code(200).send({ recoveredAt: now, result, preview: await recoveryPreview(userId) });
+  });
+
 }
