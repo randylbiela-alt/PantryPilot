@@ -9,7 +9,7 @@ const params=z.object({householdId:z.string().uuid()});
 const itemParams=params.extend({itemId:z.string().uuid()});
 const body=z.object({name:z.string().trim().min(1).max(120),onHand:z.boolean().default(true)});
 const patch=body.extend({version:z.number().int().positive()});
-const common=["Salt","Black Pepper","Garlic Powder","Onion Powder","Paprika","Smoked Paprika","Cinnamon","Basil","Oregano","Parsley","Rosemary","Sage","Thyme","Bay Leaves","Dill","Cumin","Chili Powder","Cayenne Pepper","Crushed Red Pepper","Turmeric","Coriander","Mustard Powder","Italian Seasoning","Taco Seasoning","Cajun Seasoning","Poultry Seasoning","Everything Bagel Seasoning"];
+const common=["Salt","Black Pepper","Garlic Powder","Onion Powder","Paprika","Smoked Paprika","Cinnamon","Basil","Oregano","Parsley","Rosemary","Sage","Thyme","Bay Leaves","Dill","Cumin","Chili Powder","Cayenne Pepper","Crushed Red Pepper","Turmeric","Coriander","Mustard Powder","Italian Seasoning","Taco Seasoning","Cajun Seasoning","Poultry Seasoning","Everything Bagel Seasoning","White Pepper","Nutmeg","Ginger","Allspice","Cloves","Cardamom","Curry Powder","Garam Masala"];
 export const normalizeSpiceName=(value:string)=>value.trim().toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
 const normalize=normalizeSpiceName;
 const commonNormalized=new Set(common.map(normalize));

@@ -20,11 +20,29 @@ describe("common spice helpers", () => {
     expect(normalizeSpiceName("  Garlic-Powder  ")).toBe("garlic powder");
   });
 
+  it("includes every recognized canonical spice in the common collection", () => {
+    const canonicalAdditions = [
+      "White Pepper",
+      "Nutmeg",
+      "Ginger",
+      "Allspice",
+      "Cloves",
+      "Cardamom",
+      "Curry Powder",
+      "Garam Masala"
+    ];
+    const summary = commonSpiceSummary(canonicalAdditions);
+    expect(summary.total).toBe(35);
+    expect(summary.present).toBe(8);
+    expect(summary.missing).toBe(27);
+    expect(summary.complete).toBe(false);
+  });
+
   it("reports an incomplete collection without counting duplicates", () => {
     const summary = commonSpiceSummary(["Salt", "Black Pepper", "salt"]);
-    expect(summary.total).toBe(27);
+    expect(summary.total).toBe(35);
     expect(summary.present).toBe(2);
-    expect(summary.missing).toBe(25);
+    expect(summary.missing).toBe(33);
     expect(summary.complete).toBe(false);
   });
 });
