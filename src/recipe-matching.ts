@@ -9,6 +9,8 @@ import { calculateRecommendations, type RecipeRecommendation } from "./intellige
 import { canonicalSpiceName } from "./spice-recognition.js";
 
 const params = z.object({ householdId: z.string().uuid(), recipeId: z.string().uuid() }).strict();
+type RecipeSpiceRequirement = { name: string; onHand: boolean; inShopping: boolean };
+type RecipeMatchWithSpices = RecipeRecommendation & { spiceRequirements: RecipeSpiceRequirement[] };
 const titleCase = (value: string) => value.split(" ").filter(Boolean).map(word => word.split("-").map(part => part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part).join("-")).join(" ");
 const shoppingAliases = new Map<string, string>([
  ["andouille", "andouille sausage"], ["andouille sausage", "andouille sausage"],
@@ -35,11 +37,12 @@ const shoppingName = (value: string) => {
  return titleCase(cleaned || normalizeName(value));
 };
 
-async function calculateMatch(householdId: string, recipeId: string): Promise<RecipeRecommendation> {
- const [recipe, pantry, spiceCabinet] = await Promise.all([
+async function calculateMatch(householdId: string, recipeId: string): Promise<RecipeMatchWithSpices> {
+ const [recipe, pantry, spiceCabinet, activeList] = await Promise.all([
   db.recipe.findFirst({ where: { id: recipeId, householdId }, include: { ingredients: { orderBy: { sortOrder: "asc" } } } }),
   db.pantryItem.findMany({ where: { householdId, archivedAt: null } }),
-  db.spiceCabinetItem.findMany({ where: { householdId }, select: { name: true, onHand: true } })
+  db.spiceCabinetItem.findMany({ where: { householdId }, select: { name: true, onHand: true } }),
+  db.groceryList.findFirst({ where: { householdId, status: "ACTIVE" }, include: { items: { where: { checked: false } } }, orderBy: { updatedAt: "desc" } })
  ]);
  if (!recipe) throw errors.notFound();
  const baseMatch = calculateRecommendations([recipe], pantry)[0];
@@ -50,6 +53,12 @@ async function calculateMatch(householdId: string, recipeId: string): Promise<Re
   const canonical = canonicalSpiceName(item.name);
   if (canonical) cabinetAvailability.set(normalizeName(canonical), item.onHand);
  }
+ const shoppingNames = new Set((activeList?.items ?? []).map(item => item.normalizedName));
+ const spiceRequirements = [...new Map(recipe.ingredients
+  .map(ingredient => canonicalSpiceName(ingredient.name))
+  .filter((name): name is string => name !== null)
+  .map(name => [normalizeName(name), name] as const)).entries()]
+  .map(([key, name]) => ({ name, onHand: cabinetAvailability.get(key) === true, inShopping: shoppingNames.has(key) }));
 
  const spiceKeys = new Set(recipe.ingredients
   .map(ingredient => canonicalSpiceName(ingredient.name))
@@ -75,7 +84,7 @@ async function calculateMatch(householdId: string, recipeId: string): Promise<Re
 
  const availableIngredients = Math.max(0, baseMatch.totalIngredients - missingIngredients.length);
  const score = baseMatch.totalIngredients === 0 ? 100 : Math.round((availableIngredients / baseMatch.totalIngredients) * 100);
- return { ...baseMatch, score, availableIngredients, missingIngredients };
+ return { ...baseMatch, score, availableIngredients, missingIngredients, spiceRequirements };
 }
 
 async function audit(request: FastifyRequest, householdId: string, recipeId: string, action: string, metadata: Prisma.InputJsonValue) {
@@ -89,6 +98,29 @@ export async function recipeMatchingRoutes(app: FastifyInstance): Promise<void> 
  const match = await calculateMatch(householdId, recipeId);
  await audit(request, householdId, recipeId, "recipe.match.viewed", { score: match.score, missingCount: match.missingIngredients.length });
  return match;
+ });
+
+ app.post("/api/v1/households/:householdId/recipes/:recipeId/add-missing-spices-to-grocery", async request => {
+ const { householdId, recipeId } = params.parse(request.params);
+ await requireHousehold(request, householdId, true);
+ const match = await calculateMatch(householdId, recipeId);
+ const missingSpices = match.spiceRequirements.filter(spice => !spice.onHand && !spice.inShopping);
+ return db.$transaction(async transaction => {
+  let list = await transaction.groceryList.findFirst({ where: { householdId, status: "ACTIVE" }, include: { items: true }, orderBy: { updatedAt: "desc" } });
+  if (!list) list = await transaction.groceryList.create({ data: { householdId, name: "Current List", status: "ACTIVE", createdByUserId: request.authUser!.id }, include: { items: true } });
+  const existing = new Set(list.items.filter(item => !item.checked).map(item => item.normalizedName));
+  const added: Array<{ id: string; name: string }> = [];
+  let skipped = 0;
+  for (const spice of missingSpices) {
+   const normalized = normalizeName(spice.name);
+   if (existing.has(normalized)) { skipped += 1; continue; }
+   const created = await transaction.groceryListItem.create({ data: { groceryListId: list.id, name: spice.name, normalizedName: normalized, checked: false } });
+   existing.add(normalized);
+   added.push({ id: created.id, name: spice.name });
+  }
+  await audit(request, householdId, recipeId, "recipe.missing_spices.added_to_grocery", { added: added.length, skipped });
+  return { groceryListId: list.id, added: added.length, skipped, items: added, match };
+ });
  });
 
  app.post("/api/v1/households/:householdId/recipes/:recipeId/add-missing-to-grocery", async request => {
