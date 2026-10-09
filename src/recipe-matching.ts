@@ -9,6 +9,7 @@ import { calculateRecommendations, type RecipeRecommendation } from "./intellige
 import { canonicalSpiceName } from "./spice-recognition.js";
 
 const params = z.object({ householdId: z.string().uuid(), recipeId: z.string().uuid() }).strict();
+const matchQuery = z.object({ desiredServings: z.coerce.number().positive().max(100).optional() }).strict();
 type RecipeSpiceRequirement = { name: string; onHand: boolean; inShopping: boolean };
 type RecipeMatchWithSpices = RecipeRecommendation & { spiceRequirements: RecipeSpiceRequirement[] };
 const titleCase = (value: string) => value.split(" ").filter(Boolean).map(word => word.split("-").map(part => part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part).join("-")).join(" ");
@@ -37,7 +38,7 @@ const shoppingName = (value: string) => {
  return titleCase(cleaned || normalizeName(value));
 };
 
-async function calculateMatch(householdId: string, recipeId: string): Promise<RecipeMatchWithSpices> {
+async function calculateMatch(householdId: string, recipeId: string, desiredServings?: number): Promise<RecipeMatchWithSpices> {
  const [recipe, pantry, spiceCabinet, activeList] = await Promise.all([
   db.recipe.findFirst({ where: { id: recipeId, householdId }, include: { ingredients: { orderBy: { sortOrder: "asc" } } } }),
   db.pantryItem.findMany({ where: { householdId, archivedAt: null } }),
@@ -45,7 +46,9 @@ async function calculateMatch(householdId: string, recipeId: string): Promise<Re
   db.groceryList.findFirst({ where: { householdId, status: "ACTIVE" }, include: { items: { where: { checked: false } } }, orderBy: { updatedAt: "desc" } })
  ]);
  if (!recipe) throw errors.notFound();
- const baseMatch = calculateRecommendations([recipe], pantry)[0];
+ const multiplier = desiredServings === undefined ? new Prisma.Decimal(1) : new Prisma.Decimal(desiredServings).div(recipe.servings);
+ const scaledRecipe = { ...recipe, ingredients: recipe.ingredients.map(ingredient => ({ ...ingredient, quantity: new Prisma.Decimal(ingredient.quantity).mul(multiplier) })) };
+ const baseMatch = calculateRecommendations([scaledRecipe], pantry)[0];
  if (!baseMatch) throw errors.notFound();
 
  const cabinetAvailability = new Map<string, boolean>();
@@ -94,8 +97,9 @@ async function audit(request: FastifyRequest, householdId: string, recipeId: str
 export async function recipeMatchingRoutes(app: FastifyInstance): Promise<void> {
  app.get("/api/v1/households/:householdId/recipes/:recipeId/match", async request => {
  const { householdId, recipeId } = params.parse(request.params);
+ const { desiredServings } = matchQuery.parse(request.query);
  await requireHousehold(request, householdId);
- const match = await calculateMatch(householdId, recipeId);
+ const match = await calculateMatch(householdId, recipeId, desiredServings);
  await audit(request, householdId, recipeId, "recipe.match.viewed", { score: match.score, missingCount: match.missingIngredients.length });
  return match;
  });
