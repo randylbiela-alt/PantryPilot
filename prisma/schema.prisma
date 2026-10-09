@@ -98,6 +98,7 @@ model Household {
   consolidationLearnings ConsolidationLearning[]
   supportIssues SupportIssue[]
   cookingSessions RecipeCookingSession[]
+  ingredientMappings RecipeIngredientPantryMapping[]
 }
 
 model HouseholdMember {
@@ -149,6 +150,7 @@ model PantryItem {
 
   @@index([householdId, normalizedName])
   @@index([householdId, expirationDate])
+  ingredientMappings RecipeIngredientPantryMapping[]
 }
 
 
@@ -257,6 +259,7 @@ model Recipe {
   household    Household          @relation(fields: [householdId], references: [id], onDelete: Cascade)
   ingredients  RecipeIngredient[]
   cookingSessions RecipeCookingSession[]
+  ingredientMappings RecipeIngredientPantryMapping[]
 
   @@index([householdId, name])
   @@index([householdId, favorite])
@@ -272,6 +275,25 @@ model RecipeIngredient {
   recipe    Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
 
   @@index([recipeId, sortOrder])
+}
+
+
+model RecipeIngredientPantryMapping {
+  id                       String   @id @default(uuid()) @db.Uuid
+  householdId              String   @db.Uuid
+  recipeId                 String   @db.Uuid
+  ingredientNormalizedName String
+  pantryItemId             String   @db.Uuid
+  matchMethod              String   @default("MANUAL")
+  confirmedByUserId        String   @db.Uuid
+  createdAt                DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime @updatedAt @db.Timestamptz(6)
+  household                Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  recipe                   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  pantryItem               PantryItem @relation(fields: [pantryItemId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, recipeId, ingredientNormalizedName])
+  @@index([pantryItemId])
 }
 
 model RecipeCookingSession {

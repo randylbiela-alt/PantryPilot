@@ -47,19 +47,24 @@ async function scaledShoppingRequirements(householdId: string, sessionId: string
 }
 
 type DepletionAllocation = { pantryItemId: string; pantryItemName: string; quantityBefore: number; quantityUsed: number; quantityAfter: number; unit: string; version: number };
-type DepletionIngredient = { name: string; requiredQuantity: number; unit: string; status: "MATCHED" | "INSUFFICIENT" | "UNMATCHED" | "SPICE"; availableQuantity: number; allocations: DepletionAllocation[] };
+type PantryCandidate = { pantryItemId: string; name: string; quantity: number; unit: string; version: number };
+type DepletionIngredient = { ingredientKey: string; name: string; requiredQuantity: number; unit: string; status: "MATCHED" | "LEARNED" | "INSUFFICIENT" | "UNMATCHED" | "SPICE"; availableQuantity: number; mappedPantryItemId: string | null; candidates: PantryCandidate[]; allocations: DepletionAllocation[] };
 
 async function depletionPreview(householdId: string, sessionId: string): Promise<{ sessionId: string; canApply: boolean; ingredients: DepletionIngredient[] }> {
-  const [session, pantry] = await Promise.all([
+  const [session, pantry, mappings] = await Promise.all([
     db.recipeCookingSession.findFirst({ where: { id: sessionId, householdId } }),
-    db.pantryItem.findMany({ where: { householdId, archivedAt: null }, orderBy: [{ expirationDate: "asc" }, { createdAt: "asc" }, { id: "asc" }] })
+    db.pantryItem.findMany({ where: { householdId, archivedAt: null }, orderBy: [{ expirationDate: "asc" }, { createdAt: "asc" }, { id: "asc" }] }),
+    db.recipeIngredientPantryMapping.findMany({ where: { householdId } })
   ]);
   if (!session) throw errors.notFound();
   const snapshot = session.ingredientSnapshot as SnapshotIngredient[];
   const ingredients: DepletionIngredient[] = snapshot.map(ingredient => {
-    if (canonicalSpiceName(ingredient.name)) return { name: ingredient.name, requiredQuantity: Number(ingredient.quantity), unit: ingredient.unit, status: "SPICE", availableQuantity: 0, allocations: [] };
-    const normalized = normalizeName(ingredient.name);
-    const matches = pantry.filter(item => item.normalizedName === normalized && compatibleUnit(item.unit, ingredient.unit));
+    const ingredientKey = normalizeName(ingredient.name);
+    if (canonicalSpiceName(ingredient.name)) return { ingredientKey, name: ingredient.name, requiredQuantity: Number(ingredient.quantity), unit: ingredient.unit, status: "SPICE", availableQuantity: 0, mappedPantryItemId: null, candidates: [], allocations: [] };
+    const normalized = ingredientKey;
+    const remembered = mappings.find(mapping => mapping.recipeId === session.recipeId && mapping.ingredientNormalizedName === normalized);
+    const candidates = pantry.filter(item => compatibleUnit(item.unit, ingredient.unit)).map(item => ({ pantryItemId: item.id, name: item.name, quantity: Number(item.quantity), unit: item.unit, version: item.version }));
+    const matches = remembered ? pantry.filter(item => item.id === remembered.pantryItemId && compatibleUnit(item.unit, ingredient.unit)) : pantry.filter(item => item.normalizedName === normalized && compatibleUnit(item.unit, ingredient.unit));
     let remaining = new Prisma.Decimal(ingredient.quantity);
     const allocations: DepletionAllocation[] = [];
     for (const item of matches) {
@@ -70,8 +75,8 @@ async function depletionPreview(householdId: string, sessionId: string): Promise
       remaining = remaining.minus(used);
     }
     const availableQuantity = allocations.reduce((sum, allocation) => sum + allocation.quantityUsed, 0);
-    const status = matches.length === 0 ? "UNMATCHED" : remaining.greaterThan(0) ? "INSUFFICIENT" : "MATCHED";
-    return { name: ingredient.name, requiredQuantity: Number(ingredient.quantity), unit: ingredient.unit, status, availableQuantity: displayQuantity(availableQuantity), allocations };
+    const status = matches.length === 0 ? "UNMATCHED" : remaining.greaterThan(0) ? "INSUFFICIENT" : remembered ? "LEARNED" : "MATCHED";
+    return { ingredientKey, name: ingredient.name, requiredQuantity: Number(ingredient.quantity), unit: ingredient.unit, status, availableQuantity: displayQuantity(availableQuantity), mappedPantryItemId: remembered?.pantryItemId ?? null, candidates, allocations };
   });
   return { sessionId, canApply: ingredients.some(item => item.allocations.length > 0), ingredients };
 }
@@ -125,12 +130,17 @@ export async function cookingSessionRoutes(app: FastifyInstance): Promise<void> 
   app.post("/api/v1/households/:householdId/cooking-sessions/:sessionId/complete-with-depletion", async request => {
     const { householdId, sessionId } = sessionParams.parse(request.params);
     await requireHousehold(request, householdId, true);
-    const input = z.object({ version: z.number().int().positive() }).strict().parse(request.body);
-    const preview = await depletionPreview(householdId, sessionId);
+    const input = z.object({ version: z.number().int().positive(), overrides: z.array(z.object({ ingredientKey: z.string(), action: z.enum(["USE", "SKIP", "NOT_TRACKED"]), pantryItemId: z.string().uuid().optional(), quantityUsed: z.number().nonnegative().optional(), remember: z.boolean().default(false) }).strict()).default([]) }).strict().parse(request.body);
+    const basePreview = await depletionPreview(householdId, sessionId);
+    const sessionForOverrides = await db.recipeCookingSession.findFirst({ where: { id: sessionId, householdId } });
+    if (!sessionForOverrides) throw errors.notFound();
+    const pantryForOverrides = await db.pantryItem.findMany({ where: { householdId, archivedAt: null } });
+    const preview = { ...basePreview, ingredients: basePreview.ingredients.map(ingredient => { const override = input.overrides.find(item => item.ingredientKey === ingredient.ingredientKey); if (!override || override.action !== "USE" || !override.pantryItemId) return override?.action === "SKIP" || override?.action === "NOT_TRACKED" ? { ...ingredient, allocations: [], availableQuantity: 0 } : ingredient; const item = pantryForOverrides.find(candidate => candidate.id === override.pantryItemId); if (!item || !compatibleUnit(item.unit, ingredient.unit)) return ingredient; const used = Prisma.Decimal.min(new Prisma.Decimal(item.quantity), new Prisma.Decimal(override.quantityUsed ?? ingredient.requiredQuantity)); return { ...ingredient, status: "MATCHED" as const, mappedPantryItemId: item.id, availableQuantity: used.toNumber(), allocations: [{ pantryItemId: item.id, pantryItemName: item.name, quantityBefore: Number(item.quantity), quantityUsed: used.toNumber(), quantityAfter: new Prisma.Decimal(item.quantity).minus(used).toNumber(), unit: item.unit, version: item.version }] }; }) };
     const correlationId = `cooking-session:${sessionId}`;
     return db.$transaction(async tx => {
       const session = await tx.recipeCookingSession.findFirst({ where: { id: sessionId, householdId, version: input.version } });
       if (!session || session.status === "COMPLETED") throw errors.conflict();
+      for (const override of input.overrides) { if (override.action === "USE" && override.pantryItemId && override.remember) await tx.recipeIngredientPantryMapping.upsert({ where: { householdId_recipeId_ingredientNormalizedName: { householdId, recipeId: session.recipeId, ingredientNormalizedName: override.ingredientKey } }, create: { householdId, recipeId: session.recipeId, ingredientNormalizedName: override.ingredientKey, pantryItemId: override.pantryItemId, confirmedByUserId: request.authUser!.id, matchMethod: "MANUAL" }, update: { pantryItemId: override.pantryItemId, confirmedByUserId: request.authUser!.id, matchMethod: "MANUAL" } }); }
       for (const ingredient of preview.ingredients) for (const allocation of ingredient.allocations) {
         const changed = await tx.pantryItem.updateMany({ where: { id: allocation.pantryItemId, householdId, version: allocation.version, archivedAt: null }, data: { quantity: allocation.quantityAfter, updatedByUserId: request.authUser!.id, version: { increment: 1 } } });
         if (changed.count !== 1) throw errors.conflict();
