@@ -97,6 +97,7 @@ model Household {
   consolidationSuppressions ConsolidationSuppression[]
   consolidationLearnings ConsolidationLearning[]
   supportIssues SupportIssue[]
+  cookingSessions RecipeCookingSession[]
 }
 
 model HouseholdMember {
@@ -255,6 +256,7 @@ model Recipe {
   plannedMeals PlannedMeal[]
   household    Household          @relation(fields: [householdId], references: [id], onDelete: Cascade)
   ingredients  RecipeIngredient[]
+  cookingSessions RecipeCookingSession[]
 
   @@index([householdId, name])
   @@index([householdId, favorite])
@@ -270,6 +272,33 @@ model RecipeIngredient {
   recipe    Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
 
   @@index([recipeId, sortOrder])
+}
+
+model RecipeCookingSession {
+  id                 String   @id @default(uuid()) @db.Uuid
+  householdId        String   @db.Uuid
+  recipeId           String   @db.Uuid
+  plannedMealId      String?  @db.Uuid
+  createdByUserId    String   @db.Uuid
+  origin             String   @default("AD_HOC")
+  status             String   @default("DRAFT")
+  recipeVersion      Int
+  originalServings   Int
+  desiredServings    Decimal  @db.Decimal(10, 2)
+  batchMultiplier    Decimal  @db.Decimal(10, 4)
+  ingredientSnapshot Json
+  startedAt          DateTime? @db.Timestamptz(6)
+  completedAt        DateTime? @db.Timestamptz(6)
+  cancelledAt        DateTime? @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(6)
+  version            Int @default(1)
+  household          Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  recipe             Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, createdAt])
+  @@index([recipeId, status])
+  @@index([plannedMealId])
 }
 
 model SupportIssue {
